@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html>
+  <head>
+  </head>
+  <body>
+    <script>
+/****************************************************************************\
+******************************************************************************
+**                                                                          **
+**  Copyright (c) 2012 by Andrea Griffini                                   **
+**                                                                          **
+**  Permission is hereby granted, free of charge, to any person obtaining   **
+**  a copy of this software and associated documentation files (the         **
+**  "Software"), to deal in the Software without restriction, including     **
+**  without limitation the rights to use, copy, modify, merge, publish,     **
+**  distribute, sublicense, and/or sell copies of the Software, and to      **
+**  permit persons to whom the Software is furnished to do so, subject to   **
+**  the following conditions:                                               **
+**                                                                          **
+**  The above copyright notice and this permission notice shall be          **
+**  included in all copies or substantial portions of the Software.         **
+**                                                                          **
+**  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,         **
+**  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF      **
+**  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND                   **
+**  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE  **
+**  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION  **
+**  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION   **
+**  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.         **
+**                                                                          **
+******************************************************************************
+\****************************************************************************/
+
+var m = new Uint8Array(65536);
+var jitcode = [];
+var a, x, y, s, p, ip, sp;
+
+function imm() { return ""+m[ip++]; }
+function zpg() { return "m["+m[ip++]+"]"; }
+function zpx() { return "m[(x+"+m[ip++]+")&255]"; }
+function zpy() { return "m[(y+"+m[ip++]+")&255]"; }
+function abs() { ip+=2; return "m["+(m[ip-2]+(m[ip-1]<<8))+"]"; }
+function abx() { ip+=2; return "m[(x+"+(m[ip-2]+(m[ip-1]<<8))+")&65535]"; }
+function aby() { ip+=2; return "m[(y+"+(m[ip-2]+(m[ip-1]<<8))+")&65535]"; }
+function iix() { var z=m[ip++]; return "m[m[("+z+"+x)&255]+(m[("+(z+1)+"+x)&255]<<16)]"; }
+function iiy() { var z=m[ip++]; return "m[(m["+z+"]+(m["+((z+1)&255)+"]<<16)+y)&65535]"; }
+function rel() { var delta=m[ip++]; if(delta>=128)delta-=256; return ""+((ip+delta)&65535); }
+function adr() { ip+=2; return ""+(m[ip-2]+(m[ip-1]<<8)); }
+function ind() { var z=m[ip]+m[ip+1]*256; ip+=2; return "m["+z+"]+(m["+((z+1)&65535)+"]<<8)"; }
+function acc() { return "a"; }
+
+function hex(n,x) { return (n > 1 ? hex(n-1, x>>4) : "") + "0123456789ABCDEF"[x&15]; }
+function parseHex(x) { var r=0; for (var i=0; i<x.length; i++) r=r*16+"0123456789ABCDEF".indexOf(x[i].toUpperCase()); return r; }
+
+function s_imm(ip)  { return [1, "#$" + hex(2,m[ip])]; }
+function s_zpg(ip)  { return [1, "$" + hex(2,m[ip])]; }
+function s_zpx(ip)  { return [1, "$" + hex(2,m[ip]) + ",x"]; }
+function s_zpy(ip)  { return [1, "$" + hex(2,m[ip]) + ",y"]; }
+function s_abs(ip)  { return [2, "$" + hex(4,m[ip]+m[(ip+1)&65535]*256)]; }
+function s_abx(ip)  { return [2, "$" + hex(4,m[ip]+m[(ip+1)&65535]*256) + ",x"]; }
+function s_aby(ip)  { return [2, "$" + hex(4,m[ip]+m[(ip+1)&65535]*256) + ",y"]; }
+function s_iix(ip)  { return [1, "($" + hex(2,m[ip]) + ",x)"]; }
+function s_iiy(ip)  { return [1, "($" + hex(2,m[ip]) + "),y"]; }
+function s_rel(ip)  { var delta = m[ip]; if (delta>=128) delta-=256; return [1, "$" + hex(4,ip+1+delta)]; }
+function s_adr(ip)  { return [2, "$" + hex(4,m[ip]+m[ip+1]*256)]; }
+function s_ind(ip)  { return [2, "($" + hex(4,m[ip]+m[ip+1]*256) + ")"]; }
+function s_acc(ip)  { return [0, "a"]; }
+
+function ___() { throw "Invalid opcode"; }
+
+function adc(m) { var z=m(); return "w="+z+"+a+c;c=(w>255);s=((w&0x80)!=0);v=((a&0x80)!=(w&0x80));a=(w&255);z=(a==0);"; }
+function and(m) { return "a&="+m()+";z=(a==0);s=(a>127);"; }
+function asl(m) { var z=m(); return "w=("+z+"<<1);c=(w>>8);w&=255;"+m+"=w;z=(w==0);s=(w>127);"; }
+function bcc(m) { return "if(!c){ip="+m()+";return;}"; }
+function bcs(m) { return "if(c){ip="+m()+";return;}"; }
+function beq(m) { return "if(z){ip="+m()+";return;}"; }
+function bit(m) { var z=m(); return "w="+z+";z=((a&w)==0);v=((w&0x40)!=0);s=((w&0x80)!=0);"; }
+function bmi(m) { return "if(s){ip="+m()+";return;}"; }
+function bne(m) { return "if(!z){ip="+m()+";return;}"; }
+function bpl(m) { return "if(!s){ip="+m()+";return;}"; }
+function brk(m) { throw "Not implemented"; }
+function bvc(m) { return "if(!v){ip="+m()+";return;}"; }
+function bvs(m) { return "if(v){ip="+m()+";return;}"; }
+function clc(m) { return "c=0;"; }
+function cld(m) { return "d=0;"; }
+function cli(m) { throw "Not implemented"; }
+function clv(m) { return "v=0;"; }
+function cmp(m) { var z=m(); return "w=a-"+z+";z=(w==0);s=(w<0);c=(w>=0);"; }
+function cpx(m) { var z=m(); return "w=x-"+z+";z=(w==0);s=(w<0);c=(w>=0);"; }
+function cpy(m) { var z=m(); return "w=y-"+z+";z=(w==0);s=(w<0);c=(w>=0);"; }
+function dec(m) { var z=m(); return "w=("+z+"-1)&255;"+z+"=w;z=(w==0);s=(w>127);"; }
+function dex(m) { return "x=(x-1)&255;z=(x==0);s=(x>127);"; }
+function dey(m) { return "y=(y-1)&255;z=(y==0);s=(y>127);"; }
+function eor(m) { return "a^="+m()+";z=(a==0);s=(a>127);"; }
+function inc(m) { var z=m(); return "w=("+z+"+1)&255;"+z+"=w;z=(w==0);s=(w>127);"; }
+function inx(m) { return "x=(x+1)&255;z=(x==0);s=(x>127);"; }
+function iny(m) { return "y=(y+1)&255;z=(y==0);s=(y>127);"; }
+function jmp(m) { return "ip="+m()+"; return;"; }
+function jsr(m) { var z=m(); return "m[256+sp]=(ip&255); m[256+((sp+1)&255)]=(ip>>8); sp=(sp+2)&255; ip="+z+"; return;"; }
+function lda(m) { return "a="+m()+";z=(a==0);s=(a>127);"; }
+function ldx(m) { return "x="+m()+";z=(x==0);s=(x>127);"; }
+function ldy(m) { return "y="+m()+";z=(y==0);s=(y>127);"; }
+function lsr(m) { var z=m(); return "w="+z+";c=w&1;w>>=1;"+m+"=w;z=(w==0);s=(w>127);"; }
+function nop(m) { return ""; }
+function ora(m) { return "a|="+m()+";s=(a>127);z=(a==0);"; }
+function pha(m) { return "m[256+sp]=a;sp=(sp+1)&255;"; }
+function php(m) { throw "Not implemented"; }
+function pla(m) { return "sp=(sp-1)&255;a=m[256+sp];z=(a==0);s=(a>127);"; }
+function plp(m) { throw "Not implemented"; }
+function rol(m) { var z=m(); return "w=("+z+"<<1)+c;c=(w>>8);w&=255;"+m+"=w;z=(w==0);s=(w>127);"; }
+function ror(m) { var z=m(); return "w="+z+"+(c?256:0);c=w&1;w>>=1;"+m+"=w;z=(w==0);s=(w>127);"; }
+function rti(m) { throw "Not implemented"; }
+function rts(m) { return "sp=(sp-2)&255;ip=m[sp+256]+m[256+((sp+1)&255)];"; }
+function sbc(m) { return "w=a-"+m()+"-(1-c);c=(w>=0);s=((w&0x80)!=0);v=((a&0x80)!=(w&0x80));a=(w&255);z=(a==0);"; }
+function sec(m) { return "c=1;"; }
+function sed(m) { return "d=1;"; }
+function sei(m) { throw "Not implemented"; }
+function sta(m) { return m()+"=a;"; }
+function stx(m) { return m()+"=x;"; }
+function sty(m) { return m()+"=y;"; }
+function tax(m) { return "x=a;z=(a==0);s=(a>127);"; }
+function tay(m) { return "y=a;z=(a==0);s=(a>127);"; }
+function tsx(m) { return "x=sp;"; }
+function txa(m) { return "a=x;z=(a==0);s=(a>127);"; }
+function txs(m) { return "sp=x;"; }
+function tya(m) { return "a=y;z=(a==0);s=(a>127);"; }
+
+var jitstoppers = ["jmp", "jsr", "rts", "brk"];
+
+var opcodes =
+/*  0,8       1,9       2,A       3,B       4,C       5,D       6,E       7,F  */
+[["brk","imm"],["ora","iix"],["___","___"],["___","___"],["___","___"],["ora","zpg"],["asl","zpg"],["___","___"],  // 00
+ ["php","___"],["ora","imm"],["asl","acc"],["___","___"],["___","___"],["ora","abs"],["asl","abs"],["___","___"],  // 08
+ ["bpl","rel"],["ora","iiy"],["___","___"],["___","___"],["___","___"],["ora","zpx"],["asl","zpx"],["___","___"],  // 10
+ ["clc","___"],["ora","aby"],["___","___"],["___","___"],["___","___"],["ora","abx"],["asl","abx"],["___","___"],  // 18
+ ["jsr","adr"],["and","iix"],["___","___"],["___","___"],["bit","zpg"],["and","zpg"],["rol","zpg"],["___","___"],  // 20
+ ["plp","___"],["and","imm"],["rol","acc"],["___","___"],["bit","abs"],["and","abs"],["rol","abs"],["___","___"],  // 28
+ ["bmi","rel"],["and","iiy"],["___","___"],["___","___"],["___","___"],["and","zpx"],["rol","zpx"],["___","___"],  // 30
+ ["sec","___"],["and","aby"],["___","___"],["___","___"],["___","___"],["and","abx"],["rol","abx"],["___","___"],  // 38
+ ["rti","___"],["eor","iix"],["___","___"],["___","___"],["___","___"],["eor","zpg"],["lsr","zpg"],["___","___"],  // 40
+ ["pha","___"],["eor","imm"],["lsr","acc"],["___","___"],["jmp","adr"],["eor","abs"],["lsr","abs"],["___","___"],  // 48
+ ["bvc","rel"],["eor","iiy"],["___","___"],["___","___"],["___","___"],["eor","zpx"],["lsr","zpx"],["___","___"],  // 50
+ ["cli","___"],["eor","aby"],["___","___"],["___","___"],["___","___"],["eor","abx"],["lsr","abx"],["___","___"],  // 58
+ ["rts","___"],["adc","iix"],["___","___"],["___","___"],["___","___"],["adc","zpg"],["ror","zpg"],["___","___"],  // 60
+ ["pla","___"],["adc","imm"],["ror","acc"],["___","___"],["jmp","ind"],["adc","abs"],["ror","abs"],["___","___"],  // 68
+ ["bvs","rel"],["adc","iiy"],["___","___"],["___","___"],["___","___"],["adc","zpx"],["ror","zpx"],["___","___"],  // 70
+ ["sei","___"],["adc","aby"],["___","___"],["___","___"],["___","___"],["adc","abx"],["ror","abx"],["___","___"],  // 78
+ ["___","___"],["sta","iix"],["___","___"],["___","___"],["sty","zpg"],["sta","zpg"],["stx","zpg"],["___","___"],  // 80
+ ["dey","___"],["___","___"],["txa","___"],["___","___"],["sty","abs"],["sta","abs"],["stx","abs"],["___","___"],  // 88
+ ["bcc","rel"],["sta","iiy"],["___","___"],["___","___"],["sty","zpx"],["sta","zpx"],["stx","zpy"],["___","___"],  // 90
+ ["tya","___"],["sta","aby"],["txs","___"],["___","___"],["___","___"],["sta","abx"],["___","___"],["___","___"],  // 98
+ ["ldy","imm"],["lda","iix"],["ldx","imm"],["___","___"],["ldy","zpg"],["lda","zpg"],["ldx","zpg"],["___","___"],  // A0
+ ["tay","___"],["lda","imm"],["tax","___"],["___","___"],["ldy","abs"],["lda","abs"],["ldx","abs"],["___","___"],  // A8
+ ["bcs","rel"],["lda","iiy"],["___","___"],["___","___"],["ldy","zpx"],["lda","zpx"],["ldx","zpy"],["___","___"],  // B0
+ ["clv","___"],["lda","aby"],["tsx","___"],["___","___"],["ldy","abx"],["lda","abx"],["ldx","aby"],["___","___"],  // B8
+ ["cpy","imm"],["cmp","iix"],["___","___"],["___","___"],["cpy","zpx"],["cmp","zpg"],["dec","zpg"],["___","___"],  // C0
+ ["iny","___"],["cmp","imm"],["dex","___"],["___","___"],["cpy","abs"],["cmp","abs"],["dec","abs"],["___","___"],  // C8
+ ["bne","rel"],["cmp","iiy"],["___","___"],["___","___"],["___","___"],["cmp","zpx"],["dec","zpx"],["___","___"],  // D0
+ ["cld","___"],["cmp","aby"],["___","___"],["___","___"],["___","___"],["cmp","abx"],["dec","abx"],["___","___"],  // D8
+ ["cpx","imm"],["sbc","iix"],["___","___"],["___","___"],["cpx","zpg"],["sbc","zpg"],["inc","zpg"],["___","___"],  // E0
+ ["inx","___"],["sbc","imm"],["nop","___"],["___","___"],["cpx","abs"],["sbc","abs"],["inc","abs"],["___","___"],  // E8
+ ["beq","rel"],["sbc","iiy"],["___","___"],["___","___"],["___","___"],["sbc","zpx"],["inc","zpx"],["___","___"],  // F0
+ ["sed","___"],["sbc","aby"],["___","___"],["___","___"],["___","___"],["sbc","abx"],["inc","abx"],["___","___"]]; // F8
+
+var revopcodes = {};
+(function() {
+    for (var i=0; i<256; i++)
+        revopcodes[opcodes[i][0]+"/"+opcodes[i][1]] = i;
+})();
+
+function disassemble(ip)
+{
+    var op = opcodes[m[ip]];
+    if (op[0] == "___")
+    {
+        return [0, hex(4, ip) + ": " + hex(2, m[ip]) + "       ???"];
+    }
+    else if (op[1] == "___")
+    {
+        return [0, hex(4, ip) + ": " + hex(2, m[ip]) + "       " + op[0]];
+    }
+    else
+    {
+        var ds = window["s_" + op[1]]((ip+1)&65535);
+        return [ds[0], (hex(4, ip) + ": " + hex(2, m[ip]) + " " +
+                        (ds[0] > 0 ? hex(2, m[(ip+1)&65535]) : "  ") + " " +
+                        (ds[0] > 1 ? hex(2, m[(ip+2)&65535]) : "  ") + " " +
+                        op[0] + " " + ds[1])];
+    }
+}
+
+function jit()
+{
+    var count = 0, code = "(function(){";
+    var ip0 = ip;
+    while (count < 100)
+    {
+        count += 1;
+        var op = opcodes[m[ip++]];
+        code += window[op[0]](window[op[1]]) + "\n";
+        if (jitstoppers.indexOf(op[0]) > -1)
+            break;
+        if (count == 100)
+            code += "ip=" + ip + ";";
+    }
+    code += "})";
+    ip = ip0;
+    return eval(code);
+}
+
+function step()
+{
+    var f = jitcode[ip];
+    if (!f) f = jitcode[ip] = jit();
+    f();
+}
+
+function assemble(s)
+{
+    var labels = {};
+    var fixups = [];
+    var mm, opcode, mr, addr;
+    s = s.split("\n");
+    for (var i=0; i<s.length; i++)
+    {
+        var L = s[i];
+        if (L.indexOf(";") != -1)
+            L = L.substr(0, L.indexOf(";"));
+        if (/^ *$/.exec(L))
+            continue;
+        if ((mm = /^([a-zA-Z][a-zA-Z0-9]*): *$/.exec(L)))
+        {
+            if (labels[mm[1]]) throw "Duplicated label '" + mm[1] + "'";
+            labels[mm[1]] = "$" + hex(4, ip);
+        }
+        else if ((mm = /^ +\.org +\$([0-9A-Fa-f]{4}) *$/.exec(L)))
+        {
+            ip = parseHex(mm[1]);
+        }
+        else
+        {
+            function value(x)
+            {
+                if (labels[x])
+                    x = labels[x];
+                var mm;
+                if ((mm = /^\$([0-9a-fA-F]{2})$/.exec(x)))
+                    return [parseHex(mm[1])];
+                if ((mm = /^\$([0-9a-fA-F]{4})$/.exec(x)))
+                {
+                    var x16 = parseHex(mm[1]);
+                    return [x16&255, x16>>8];
+                }
+                if ((mm = /^([a-zA-Z][a-zA-Z0-9_]*)$/.exec(x)))
+                {
+                    fixups.push([ip+1, mm[1], "abs"]);
+                    return [null, null];
+                }
+                throw "Unable to parse value '" + x + "'";
+            }
+
+            if ((mm = /^ +([a-z]{3}) *$/.exec(L)))
+            {
+                opcode = mm[1];
+                mr = ["___"];
+            }
+            else if ((mm = /^ +([a-z]{3}) +[aA] *$/.exec(L)))
+            {
+                opcode = mm[1];
+                mr = ["acc"];
+            }
+            else if ((mm = /^ +([a-z]{3}) +#(\$[0-9A-Fa-f]+|[0-9]+|[a-zA-Z][a-zA-Z0-9_]*) *$/.exec(L)))
+            {
+                opcode = mm[1];
+                mr = ["imm", value(mm[2])[0]];
+            }
+            else if ((mm = /^ +([a-z]{3}) +(\$[0-9A-Fa-f]+|[0-9]+|[a-zA-Z][a-zA-Z0-9_]*) *$/.exec(L)))
+            {
+                opcode = mm[1];
+                addr = value(mm[2]);
+                if (addr.length == 2)
+                    mr = ["abs", addr[0], addr[1]];
+                else
+                    mr = ["zpg", addr[0]];
+            }
+            else if ((mm = /^ +([a-z]{3}) +(\$[0-9A-Fa-f]+|[0-9]+|[a-zA-Z][a-zA-Z0-9_]*),x *$/.exec(L)))
+            {
+                opcode = mm[1];
+                addr = value(mm[2]);
+                if (addr.length == 2)
+                    mr = ["abx", addr[0], addr[1]];
+                else
+                    mr = ["zpx", addr[0]];
+            }
+            else if ((mm = /^ +([a-z]{3}) +(\$[0-9A-Fa-f]+|[0-9]+|[a-zA-Z][a-zA-Z0-9_]*),y *$/.exec(L)))
+            {
+                opcode = mm[1];
+                addr = value(mm[2]);
+                if (addr.length == 2)
+                    mr = ["aby", addr[0], addr[1]];
+                else
+                    mr = ["zpy", addr[0]];
+            }
+            else if ((mm = /^ +([a-z]{3}) +\((\$[0-9A-Fa-f]+|[0-9]+|[a-zA-Z][a-zA-Z0-9_]*),x\) *$/.exec(L)))
+            {
+                opcode = mm[1];
+                mr = ["iix", value(mm[2])[0]];
+            }
+            else if ((mm = /^ +([a-z]{3}) +\((\$[0-9A-Fa-f]+|[0-9]+|[a-zA-Z][a-zA-Z0-9_]*)\),y *$/.exec(L)))
+            {
+                opcode = mm[1];
+                mr = ["iiy", value(mm[2])];
+            }
+            else if ((mm = /^ +([a-z]{3}) +\((\$[0-9A-Fa-f]+|[0-9]+|[a-zA-Z][a-zA-Z0-9_]*)\) *$/.exec(L)))
+            {
+                opcode = mm[1];
+                var addr = value(mm[2]);
+                mr = ["ind", addr[0], addr[1]];
+            }
+            else
+            {
+                throw "Unable to parse '" + L + "'";
+            }
+
+            if (opcode[0] == "b" && opcode != "bit" && opcode != "brk" && mr[0] == "abs")
+            {
+                if (mr[1] == null)
+                {
+                    fixups[fixups.length-1][2] = "rel";
+                    mr = ["rel", null];
+                }
+                else
+                {
+                    var delta = mr[1] + mr[2]*256 - (ip + 2);
+                    if (delta < -128 || delta > 127)
+                        throw "Relative jump out of range";
+                    mr = ["rel", delta & 255];
+                }
+            }
+
+            if (opcode[0] == "j" && mr[0] == "abs")
+                mr[0] = "adr";
+
+            var rop = revopcodes[opcode + "/" + mr[0]];
+            if (rop == undefined) throw "Invalid operation/addressing mode";
+            m[ip] = rop; ip = (ip + 1)&65535;
+            for (var j=1; j<mr.length; j++)
+            {
+                m[ip] = mr[j];
+                ip = (ip + 1) & 65535;
+            }
+        }
+    }
+    for (var i=0; i<fixups.length; i++)
+    {
+        var fu = fixups[i];
+        var addr = labels[fu[1]];
+        if (addr == undefined) throw "Undefined label '" + fu[1] + "'";
+        if (fu[2] == "rel")
+        {
+            var delta = parseHex(addr.substr(1)) - (fu[0] + 1);
+            if (delta < -128 || delta > 127) throw "Relative jump to '" + fu[1] + "' out of range";
+            m[fu[0]] = delta & 255;
+        }
+        else
+        {
+            var target = parseHex(addr.substr(1));
+            m[fu[0]] = target & 255;
+            m[fu[0]+1] = target >> 8;
+        }
+    }
+}
+
+assemble("    .org $0600\n" +
+         "    ldx #$00\n" +
+         "loop:\n" +
+         "    txa\n" +
+         "    sta $0200,x\n"+
+         "    sta $0300,x\n"+
+         "    sta $0400,x\n"+
+         "    sta $0500,x\n"+
+         "    inx\n"+
+         "    bne loop\n"+
+         "    rts\n"+
+         "    jmp after\n"+
+         "    jsr loop\n"+
+         "    beq after\n"+
+         "    nop\n"+
+         "after:\n"+
+         "    lda ($FE),y\n"+
+         "    brk #$00\n");
+
+ip = 0x600;
+while (true)
+    step();
+
+    </script>
+  </body>
+</html>
