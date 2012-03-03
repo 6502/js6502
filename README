@@ -25,9 +25,9 @@
 ******************************************************************************
  ****************************************************************************
 
-Javascript emulator of 6502 CPU.
+6502 Javascript emulator.
 
-Not an interpreter, but a JIT compiler to javascript.
+Not an interpreter, but a JIT compiler to Javascript.
 
 Includes a 6502 disassembler and a small assembler.
 
