@@ -71,6 +71,110 @@ sqy   = $06
 sqdx  = $07
 sqdy  = $08
 
+;; Line drawing
+dx    = $09
+dy    = $0A
+ix    = $0B
+iy    = $0C
+cx    = $0D
+cy    = $0E
+m     = $0F
+
+;; Draws a line from x0, y0 to x1, y1
+drawline:
+    ; dx/ix computation
+    ldx #$01
+    lda x1
+    sec
+    sbc x0
+    bcs dlxpos
+    eor #$FF
+    sbc #$FE
+    ldx #$FF
+dlxpos:
+    sta dx
+    stx ix
+
+    ; dy/iy computation
+    ldx #$01
+    lda y1
+    sec
+    sbc y0
+    bcs dlypos
+    eor #$FF
+    sbc #$FE
+    ldx #$FF
+dlypos:
+    sta dy
+    stx iy
+
+    ; m/cx/cy computation
+    lda dx
+    cmp dy
+    bcs dlxm
+    lda dy
+dlxm:
+    sta m
+    tay
+    bne dlsome
+    rts
+dlsome:
+    lsr a
+    sta cx
+    sta cy
+
+    ; main loop
+dlloop:
+    lda x0
+    sta set_col
+    lda y0
+    sta set_row
+    lda color
+    sta write_pixel
+
+    ; x-inc
+    lda cx
+    clc
+    adc dx
+    sta cx
+    bcs dlxi
+    cmp m
+    bcc dlnoxi
+dlxi:
+    lda x0
+    clc
+    adc ix
+    sta x0
+    lda cx
+    sec
+    sbc m
+    sta cx
+dlnoxi:
+
+    ; y-inc
+    lda cy
+    clc
+    adc dy
+    sta cy
+    bcs dlyi
+    cmp m
+    bcc dlnoyi
+dlyi:
+    lda y0
+    clc
+    adc iy
+    sta y0
+    lda cy
+    sec
+    sbc m
+    sta cy
+dlnoyi:
+
+    dey
+    bne dlloop
+    rts
+
+
 ;; Fills a box with a solid color
 fillbox:
     lda y0
@@ -119,6 +223,30 @@ cloop:
     bne cloop
     dey
     bne cloop
+
+    ; draw 2048 random lines
+    ldy #$08
+    ldx #$00
+cloop2:
+    txa
+    pha
+    tya
+    pha
+    lda random
+    sta x1
+    lda random
+    sta y1
+    tya
+    sta color
+    jsr drawline
+    pla
+    tay
+    pla
+    tax
+    dex
+    bne cloop2
+    dey
+    bne cloop2
 
     ; Set a green-red bouncing palette
     lda #$00
@@ -380,7 +508,7 @@ function cpx(m) { ssz("w"); return "c=(x>="+m+");w=(x-"+m+")&255;"; }
 function cpy(m) { ssz("w"); return "c=(y>="+m+");w=(y-"+m+")&255;"; }
 function dec(m) { ssz(m); return m+"=("+m+"-1)&255;"; }
 function dex(m) { ssz("x"); return "x=(x-1)&255;"; }
-function dey(m) { ssz("y"); return "y=(y+1)&255;"; }
+function dey(m) { ssz("y"); return "y=(y-1)&255;"; }
 function eor(m) { ssz("a"); return "a^="+m+";"; }
 function inc(m) { ssz(m); return m+"=("+m+"+1)&255;"; }
 function inx(m) { ssz("x"); return "x=(x+1)&255;"; }
@@ -549,7 +677,7 @@ function assemble(s)
                     m[ip++] = parseInt(bb);
             }
         }
-        else if ((mm = /^([a-zA-Z][a-zA-Z_0-9]+) *= * (\$[0-9A-Fa-f]+) *$/.exec(L)))
+        else if ((mm = /^([a-zA-Z][a-zA-Z_0-9]*) *= * (\$[0-9A-Fa-f]+) *$/.exec(L)))
         {
             if (labels[mm[1]]) throw "Duplicated label '" + mm[1] + "'";
             labels[mm[1]] = mm[2];
