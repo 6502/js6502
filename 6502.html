@@ -487,7 +487,8 @@ function jit()
         }
         else if (m[ip] == 0xAD && special_read[addr=m[ip+1]+256*m[ip+2]])
         {
-            code += "a="+special_read[addr].name+"();z=(a==0);s=(a>127);\n";
+            code += "a="+special_read[addr].name+"();\n";
+            ssz("a");
             ip += 3;
         }
         else
