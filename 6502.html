@@ -128,6 +128,7 @@ set_square:
 
 ;; Main program
 start:
+    ; clear screen 
     lda #$00
     sta x0
     sta y0
@@ -136,12 +137,37 @@ start:
     sta y1
     jsr clearbox
 
-    lda #$10
+    ; Set a green-red bouncing palette
+    lda #$00
+    sta set_palette
+    ldx #$00
+ploop1:
+    txa
+    sta write_color
+    eor #$FF
+    sta write_color
+    lda #$00
+    sta write_color
+    inx
+    inx
+    bne ploop1
+ploop2:
+    txa
+    eor #$FF
+    sta write_color
+    eor #$FF
+    sta write_color
+    lda #$00
+    sta write_color
+    inx
+    inx
+    bne ploop2
+
+    ; Set starting position and speed
+    lda #$01
     sta sqx
     sta sqy
-    lda #$05
     sta sqdx
-    lda #$03
     sta sqdy
 mainloop:
     ; Increment square position
@@ -160,7 +186,7 @@ xok:
     lda sqy
     clc
     adc sqdy
-    cmp #$DF
+    cmp #$DD
     bcc yok
     lda sqdy
     eor #$FF
