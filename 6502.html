@@ -65,9 +65,6 @@ sqy   = $06
 sqdx  = $07
 sqdy  = $08
 
-;; Delay
-delay = $09
-
 ;; Fills a box with a solid color
 fillbox:
     lda y0
@@ -144,18 +141,15 @@ start:
     sta sqy
     lda #$05
     sta sqdx
-    lda #$07
+    lda #$03
     sta sqdy
 mainloop:
     ; Increment square position
     lda sqx
     clc
     adc sqdx
-    cmp #$00
-    bmi xflip
     cmp #$DF
-    bmi xok
-xflip:
+    bcc xok
     lda sqdx
     eor #$FF
     sta sqdx
@@ -166,11 +160,8 @@ xok:
     lda sqy
     clc
     adc sqdy
-    cmp #$00
-    bmi yflip
     cmp #$DF
-    bmi yok
-yflip:
+    bcc yok
     lda sqdy
     eor #$FF
     sta sqdy
@@ -183,16 +174,6 @@ yok:
     jsr set_square
     inc color
     jsr fillbox
-
-    ; Wait
-    ldx delay
-    ldy #$00
-waitloop:
-    dey
-    bne waitloop
-    dex
-    bne waitloop
-    dec delay
 
     jmp mainloop
 
@@ -260,11 +241,56 @@ var special_write = { 0xFF00: set_palette,
                       0xFF04: write_pixel };
 var special_read = { };
 
+// Utility ////////////////////////////////////////////////////////////
+
+function hex(n,x)
+{
+    var r = "";
+    for (var i=0; i<n; i++)
+    {
+        r = "0123456789ABCDEF"[x & 15] + r;
+        x >>= 4;
+    }
+    return r;
+}
+
+function parseHex(x)
+{
+    var r = 0;
+    for (var i=0; i<x.length; i++)
+        r = (r << 4) + "0123456789ABCDEF".indexOf(x[i].toUpperCase());
+    return r;
+}
+
 // Virtual CPU ////////////////////////////////////////////////////////
 
 var m = new Uint8Array(65536);
 var jitcode = [];
-var a=0, x=0, y=0, s=0, d=0, v=0, ip=0, sp=0;
+var a=0, x=0, y=0, c=0, z=0, w=0, s=0, d=0, v=0, ip=0, sp=0;
+
+// Lazy Z/S evaluation; set_[sz] contains the code to set the flag
+// s[sz](x) sets this code, f[sz]() returns the code and clears it.
+var set_z = "";
+var set_s = "";
+
+function sz(x)  { set_z = "z=!(" + x + ");"; }
+function ss(x)  { set_s = "s=((" + x + ")>127);"; }
+function ssz(x) { sz(x); ss(x); }
+function fz()   { var oz=set_z; set_z=""; return oz; }
+function fs()   { var os=set_s; set_s=""; return os; }
+function fsz()  { return fz()+fs(); }
+
+function fszm()
+{
+    // Special case; if current delayed S/Z flags are
+    // from memory then we must evalate them before any
+    // memory write. If they're from registers then
+    // we can instead just keep delaying...
+    return ((set_z.indexOf("m")!=-1 ? fz() : "") +
+            (set_s.indexOf("m")!=-1 ? fs() : ""));
+}
+
+// Addressing modes
 
 function imm() { return ""+m[ip++]; }
 function zpg() { return "m["+m[ip++]+"]"; }
@@ -280,8 +306,7 @@ function adr() { ip+=2; return ""+(m[ip-2]+(m[ip-1]<<8)); }
 function ind() { var z=m[ip]+m[ip+1]*256; ip+=2; return "m["+z+"]+(m["+((z+1)&65535)+"]<<8)"; }
 function acc() { return "a"; }
 
-function hex(n,x) { return (n > 1 ? hex(n-1, x>>4) : "") + "0123456789ABCDEF"[x&15]; }
-function parseHex(x) { var r=0; for (var i=0; i<x.length; i++) r=r*16+"0123456789ABCDEF".indexOf(x[i].toUpperCase()); return r; }
+// Disassembling addressing modes
 
 function s_imm(ip)  { return [1, "#$" + hex(2,m[ip])]; }
 function s_zpg(ip)  { return [1, "$" + hex(2,m[ip])]; }
@@ -297,64 +322,66 @@ function s_adr(ip)  { return [2, "$" + hex(4,m[ip]+m[ip+1]*256)]; }
 function s_ind(ip)  { return [2, "($" + hex(4,m[ip]+m[ip+1]*256) + ")"]; }
 function s_acc(ip)  { return [0, "a"]; }
 
-function ___() { throw "Invalid opcode"; }
+// Opcode implentation
 
-function adc(m) { var z=m(); return "w="+z+"+a+c;c=(w>255);s=((w&0x80)!=0);v=((a&0x80)!=(w&0x80));a=(w&255);z=(a==0);"; }
-function and(m) { return "a&="+m()+";z=(a==0);s=(a>127);"; }
-function asl(m) { var z=m(); return "w=("+z+"<<1);c=(w>>8);w&=255;"+m+"=w;z=(w==0);s=(w>127);"; }
-function bcc(m) { return "if(!c){ip="+m()+";return;}"; }
-function bcs(m) { return "if(c){ip="+m()+";return;}"; }
-function beq(m) { return "if(z){ip="+m()+";return;}"; }
-function bit(m) { var z=m(); return "w="+z+";z=((a&w)==0);v=((w&0x40)!=0);s=((w&0x80)!=0);"; }
-function bmi(m) { return "if(s){ip="+m()+";return;}"; }
-function bne(m) { return "if(!z){ip="+m()+";return;}"; }
-function bpl(m) { return "if(!s){ip="+m()+";return;}"; }
-function brk(m) { return "alert(\"BRK #$" + hex(2, m()) + "\");ip=0;return;"; }
-function bvc(m) { return "if(!v){ip="+m()+";return;}"; }
-function bvs(m) { return "if(v){ip="+m()+";return;}"; }
+function ___()  { return "{*Invalid opcode*}"; }
+
+function adc(m) { ssz("a"); return "w="+m+"+a+c;c=(w>255);v=((a&0x80)!=(w&0x80));a=(w&255);"; }
+function and(m) { ssz("a"); return "a&="+m+";"; }
+function asl(m) { ssz(m); return "w=("+m+"<<1);c=(w>255);"+m+"=w&255;"; }
+function bcc(m) { return "if(!c){"+fsz()+"ip="+m+";return;}"; }
+function bcs(m) { return "if(c){"+fsz()+"ip="+m+";return;}"; }
+function beq(m) { return fz()+"if(z){"+fs()+"ip="+m+";return;}"; }
+function bit(m) { sz("a&"+m); ss(m); return "v=(("+m+"&0x40)!=0);"; }
+function bmi(m) { return fs()+"if(s){"+fz()+"ip="+m+";return;}"; }
+function bne(m) { return fz()+"if(!z){"+fs()+"ip="+m+";return;}"; }
+function bpl(m) { return fs()+"if(!s){"+fz()+"ip="+m+";return;}"; }
+function brk(m) { return fsz()+"alert(\"BRK #$" + hex(2, m) + "\");ip=0;return;"; }
+function bvc(m) { return "if(!v){"+fsz()+"ip="+m+";return;}"; }
+function bvs(m) { return "if(v){"+fsz()+"ip="+m+";return;}"; }
 function clc(m) { return "c=0;"; }
 function cld(m) { return "d=0;"; }
 function cli(m) { throw "Not implemented"; }
 function clv(m) { return "v=0;"; }
-function cmp(m) { var z=m(); return "w=a-"+z+";z=(w==0);s=(w<0);c=(w>=0);"; }
-function cpx(m) { var z=m(); return "w=x-"+z+";z=(w==0);s=(w<0);c=(w>=0);"; }
-function cpy(m) { var z=m(); return "w=y-"+z+";z=(w==0);s=(w<0);c=(w>=0);"; }
-function dec(m) { var z=m(); return "w=("+z+"-1)&255;"+z+"=w;z=(w==0);s=(w>127);"; }
-function dex(m) { return "x=(x-1)&255;z=(x==0);s=(x>127);"; }
-function dey(m) { return "y=(y-1)&255;z=(y==0);s=(y>127);"; }
-function eor(m) { return "a^="+m()+";z=(a==0);s=(a>127);"; }
-function inc(m) { var z=m(); return "w=("+z+"+1)&255;"+z+"=w;z=(w==0);s=(w>127);"; }
-function inx(m) { return "x=(x+1)&255;z=(x==0);s=(x>127);"; }
-function iny(m) { return "y=(y+1)&255;z=(y==0);s=(y>127);"; }
-function jmp(m) { return "ip="+m()+"; return;"; }
-function jsr(m) { var z=m(); return "m[256+sp]="+(ip&255)+";m[256+((sp+1)&255)]="+(ip>>8)+";sp=(sp+2)&255;ip="+z+";return;"; }
-function lda(m) { return "a="+m()+";z=(a==0);s=(a>127);"; }
-function ldx(m) { return "x="+m()+";z=(x==0);s=(x>127);"; }
-function ldy(m) { return "y="+m()+";z=(y==0);s=(y>127);"; }
-function lsr(m) { var z=m(); return "w="+z+";c=w&1;w>>=1;"+m+"=w;z=(w==0);s=(w>127);"; }
+function cmp(m) { ssz("w"); return "c=(a>="+m+");w=(a-"+m+")&255;"; }
+function cpx(m) { ssz("w"); return "c=(x>="+m+");w=(x-"+m+")&255;"; }
+function cpy(m) { ssz("w"); return "c=(y>="+m+");w=(y-"+m+")&255;"; }
+function dec(m) { ssz(m); return m+"=("+m+"-1)&255;"; }
+function dex(m) { ssz("x"); return "x=(x-1)&255;"; }
+function dey(m) { ssz("y"); return "y=(y+1)&255;"; }
+function eor(m) { ssz("a"); return "a^="+m+";"; }
+function inc(m) { ssz(m); return m+"=("+m+"+1)&255;"; }
+function inx(m) { ssz("x"); return "x=(x+1)&255;"; }
+function iny(m) { ssz("y"); return "y=(y+1)&255;"; }
+function jmp(m) { return fsz()+"ip="+m+"; return;"; }
+function jsr(m) { return fsz()+"m[256+sp]="+(ip&255)+";m[256+((sp+1)&255)]="+(ip>>8)+";sp=(sp+2)&255;ip="+m+";return;"; }
+function lda(m) { ssz("a"); return "a="+m+";"; }
+function ldx(m) { ssz("x"); return "x="+m+";"; }
+function ldy(m) { ssz("y"); return "y="+m+";"; }
+function lsr(m) { ssz(m); return "c="+m+"&1;"+m+">>=1;"; }
 function nop(m) { return ""; }
-function ora(m) { return "a|="+m()+";s=(a>127);z=(a==0);"; }
+function ora(m) { ssz("a"); return "a|="+m+";"; }
 function pha(m) { return "m[256+sp]=a;sp=(sp+1)&255;"; }
 function php(m) { throw "Not implemented"; }
-function pla(m) { return "sp=(sp-1)&255;a=m[256+sp];z=(a==0);s=(a>127);"; }
+function pla(m) { ssz("a"); return "sp=(sp-1)&255;a=m[256+sp];"; }
 function plp(m) { throw "Not implemented"; }
-function rol(m) { var z=m(); return "w=("+z+"<<1)+c;c=(w>>8);w&=255;"+m+"=w;z=(w==0);s=(w>127);"; }
-function ror(m) { var z=m(); return "w="+z+"+(c?256:0);c=w&1;w>>=1;"+m+"=w;z=(w==0);s=(w>127);"; }
+function rol(m) { ssz(m); return "w="+m+";"+m+"=((w<<1)+c)&255;c=(w>127);"; }
+function ror(m) { ssz(m); return "w="+m+";"+m+"=((w>>1)+(c<<7));c=(w&1);"; }
 function rti(m) { throw "Not implemented"; }
-function rts(m) { return "sp=(sp-2)&255;ip=m[sp+256]+(m[256+((sp+1)&255)]<<8);"; }
-function sbc(m) { return "w=a-"+m()+"-(1-c);c=(w>=0);s=((w&0x80)!=0);v=((a&0x80)!=(w&0x80));a=(w&255);z=(a==0);"; }
+function rts(m) { return fsz()+"sp=(sp-2)&255;ip=m[sp+256]+(m[256+((sp+1)&255)]<<8);"; }
+function sbc(m) { ssz("w"); return "w=a-"+m+"-(1-c);c=(w>=0);v=((a&0x80)!=(w&0x80));a=(w&255);"; }
 function sec(m) { return "c=1;"; }
-function sed(m) { return "d=1;"; }
+function sed(m) { throw "Not implemented"; }
 function sei(m) { throw "Not implemented"; }
-function sta(m) { return m()+"=a;"; }
-function stx(m) { return m()+"=x;"; }
-function sty(m) { return m()+"=y;"; }
-function tax(m) { return "x=a;z=(a==0);s=(a>127);"; }
-function tay(m) { return "y=a;z=(a==0);s=(a>127);"; }
-function tsx(m) { return "x=sp;"; }
-function txa(m) { return "a=x;z=(a==0);s=(a>127);"; }
+function sta(m) { return fszm()+m+"=a;"; }
+function stx(m) { return fszm()+m+"=x;"; }
+function sty(m) { return fszm()+m+"=y;"; }
+function tax(m) { ssz("a"); return "x=a;"; }
+function tay(m) { ssz("a"); return "y=a;"; }
+function tsx(m) { ssz("x"); return "x=sp;"; }
+function txa(m) { ssz("a"); return "a=x;"; }
 function txs(m) { return "sp=x;"; }
-function tya(m) { return "a=y;z=(a==0);s=(a>127);"; }
+function tya(m) { ssz("a"); return "a=y;"; }
 
 var jitstoppers = ["jmp", "jsr", "rts", "brk"];
 
@@ -440,14 +467,14 @@ function jit()
         else
         {
             var op = opcodes[m[ip++]];
-            code += window[op[0]](window[op[1]]) + "\n";
+            code += window[op[0]](window[op[1]]()) + "\n";
             if (jitstoppers.indexOf(op[0]) > -1)
                 break;
         }
         if (count == 100)
             code += "ip=" + ip + ";";
     }
-    code += "})";
+    code += fsz()+"})";
     ip = ip0;
     return eval(code);
 }
