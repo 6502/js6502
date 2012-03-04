@@ -1,10 +1,6 @@
 <!DOCTYPE html>
-<html>
-  <head>
-  </head>
-  <body>
-    <script>
-/****************************************************************************\
+<!--
+ ****************************************************************************
 ******************************************************************************
 **                                                                          **
 **  Copyright (c) 2012 by Andrea Griffini                                   **
@@ -29,11 +25,246 @@
 **  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.         **
 **                                                                          **
 ******************************************************************************
-\****************************************************************************/
+ ****************************************************************************
+-->
+<html>
+  <head>
+    <title>6502 emulator</title>
+  </head>
+  <body>
+    Virtual graphic screen<br/>
+    <canvas id="canvas" style="width:512px; height:512px; border:solid 1px #000">
+    </canvas>
+    <textarea id="source" style="height:508px; width:512px;">
+;
+; Special locations
+; (they work with LDA/STA abs only!)
+;
+set_palette = $FF00 ; W: sets current index
+write_color = $FF01 ; W++: R, G or B
+set_row     = $FF02 ; W: pixel row
+set_col     = $FF03 ; W: pixel col
+write_pixel = $FF04 ; W++: writes a pixel
+
+;
+; Execution begins at "start" and stops when
+; program counter becomes $0000
+;
+    .org $0200
+
+;; Box drawing parameters
+x0    = $00
+y0    = $01
+x1    = $02
+y1    = $03
+color = $04
+
+;; Animated square position and speed
+sqx   = $05
+sqy   = $06
+sqdx  = $07
+sqdy  = $08
+
+;; Delay
+delay = $09
+
+;; Fills a box with a solid color
+fillbox:
+    lda y0
+    sta set_row
+    lda x0
+    sta set_col
+    lda x1
+    sec
+    sbc x0
+    tax
+    lda color
+fbxloop:
+    sta write_pixel
+    dex
+    bne fbxloop
+    inc y0
+    lda y0
+    cmp y1
+    bne fillbox
+    rts
+
+;; Clears a box to background (color=x+y)
+clearbox:
+    lda y0
+    sta set_row
+    lda x0
+    sta set_col
+    lda x1
+    sec
+    sbc x0
+    tax
+    lda x0
+    clc
+    adc y0
+    tay
+cbxloop:
+    tya
+    sta write_pixel
+    iny
+    dex
+    bne cbxloop
+    inc y0
+    lda y0
+    cmp y1
+    bne clearbox
+    rts
+
+;; Sets square coordinates
+set_square:
+    lda sqx
+    sta x0
+    clc
+    adc #$20
+    sta x1
+    lda sqy
+    sta y0
+    clc
+    adc #$20
+    sta y1
+    rts
+
+;; Main program
+start:
+    lda #$00
+    sta x0
+    sta y0
+    lda #$FF
+    sta x1
+    sta y1
+    jsr clearbox
+
+    lda #$10
+    sta sqx
+    sta sqy
+    lda #$05
+    sta sqdx
+    lda #$07
+    sta sqdy
+mainloop:
+    ; Increment square position
+    lda sqx
+    clc
+    adc sqdx
+    cmp #$00
+    bmi xflip
+    cmp #$DF
+    bmi xok
+xflip:
+    lda sqdx
+    eor #$FF
+    sta sqdx
+    inc sqdx
+    lda sqx
+xok:
+    sta sqx
+    lda sqy
+    clc
+    adc sqdy
+    cmp #$00
+    bmi yflip
+    cmp #$DF
+    bmi yok
+yflip:
+    lda sqdy
+    eor #$FF
+    sta sqdy
+    inc sqdy
+    lda sqy
+yok:
+    sta sqy
+
+    ; Draw square
+    jsr set_square
+    inc color
+    jsr fillbox
+
+    ; Wait
+    ldx delay
+    ldy #$00
+waitloop:
+    dey
+    bne waitloop
+    dex
+    bne waitloop
+    dec delay
+
+    jmp mainloop
+
+    </textarea>
+    <input type=button value="Run" onclick="doit()">
+    <script>
+
+// Virtual screen interface /////////////////////////////////////////////////////
+
+var canvas = document.getElementById("canvas");
+canvas.width = canvas.height = 256;
+var ctx = canvas.getContext("2d");
+var data = ctx.getImageData(0, 0, 256, 256);
+var bytes = data.data;
+var current_palette = [];
+var current_palette_index = 0;
+var current_palette_comp = 0;
+var current_address = 0;
+
+(function(){
+    for (var r=0; r<6; r++)
+        for (var g=0; g<6; g++)
+            for (var b=0; b<6; b++)
+                current_palette.push([r*51, g*51, b*51]);
+    for (var g=0; g<40; g++)
+        current_palette.push([Math.floor(g*255/39+0.5),
+                              Math.floor(g*255/39+0.5),
+                              Math.floor(g*255/39+0.5)]);
+})();
+
+function set_palette(x) { current_palette_index = x; current_palette_comp = 0; }
+
+function write_color(x)
+{
+    current_palette[current_palette_index][current_palette_comp] = x;
+    if (++current_palette_comp == 3)
+    {
+        current_palette_comp = 0;
+        current_palette_index = (current_palette_index + 1) & 255;
+    }
+}
+
+function set_row(x) { current_address = x*256*4 + (current_address & (255*4)); }
+function set_col(x) { current_address = x*4 + (current_address & (255*256*4)); }
+function write_pixel(x)
+{
+    var c = current_palette[x];
+    bytes[current_address] = c[0];
+    bytes[current_address+1] = c[1];
+    bytes[current_address+2] = c[2];
+    current_address = (current_address + 4) & (256*256*4-1);
+}
+
+(function(){
+    for (var i=0; i<256*256; i++)
+        bytes[i*4+3] = 255;
+    ctx.putImageData(data, 0, 0);
+})();
+
+// Note: special read/write only works for LDA/STA absolute
+var special_write = { 0xFF00: set_palette,
+                      0xFF01: write_color,
+                      0xFF02: set_row,
+                      0xFF03: set_col,
+                      0xFF04: write_pixel };
+var special_read = { };
+
+// Virtual CPU ////////////////////////////////////////////////////////
 
 var m = new Uint8Array(65536);
 var jitcode = [];
-var a, x, y, s, p, ip, sp;
+var a=0, x=0, y=0, s=0, d=0, v=0, ip=0, sp=0;
 
 function imm() { return ""+m[ip++]; }
 function zpg() { return "m["+m[ip++]+"]"; }
@@ -78,7 +309,7 @@ function bit(m) { var z=m(); return "w="+z+";z=((a&w)==0);v=((w&0x40)!=0);s=((w&
 function bmi(m) { return "if(s){ip="+m()+";return;}"; }
 function bne(m) { return "if(!z){ip="+m()+";return;}"; }
 function bpl(m) { return "if(!s){ip="+m()+";return;}"; }
-function brk(m) { throw "Not implemented"; }
+function brk(m) { return "alert(\"BRK #$" + hex(2, m()) + "\");ip=0;return;"; }
 function bvc(m) { return "if(!v){ip="+m()+";return;}"; }
 function bvs(m) { return "if(v){ip="+m()+";return;}"; }
 function clc(m) { return "c=0;"; }
@@ -96,7 +327,7 @@ function inc(m) { var z=m(); return "w=("+z+"+1)&255;"+z+"=w;z=(w==0);s=(w>127);
 function inx(m) { return "x=(x+1)&255;z=(x==0);s=(x>127);"; }
 function iny(m) { return "y=(y+1)&255;z=(y==0);s=(y>127);"; }
 function jmp(m) { return "ip="+m()+"; return;"; }
-function jsr(m) { var z=m(); return "m[256+sp]=(ip&255); m[256+((sp+1)&255)]=(ip>>8); sp=(sp+2)&255; ip="+z+"; return;"; }
+function jsr(m) { var z=m(); return "m[256+sp]="+(ip&255)+";m[256+((sp+1)&255)]="+(ip>>8)+";sp=(sp+2)&255;ip="+z+";return;"; }
 function lda(m) { return "a="+m()+";z=(a==0);s=(a>127);"; }
 function ldx(m) { return "x="+m()+";z=(x==0);s=(x>127);"; }
 function ldy(m) { return "y="+m()+";z=(y==0);s=(y>127);"; }
@@ -110,7 +341,7 @@ function plp(m) { throw "Not implemented"; }
 function rol(m) { var z=m(); return "w=("+z+"<<1)+c;c=(w>>8);w&=255;"+m+"=w;z=(w==0);s=(w>127);"; }
 function ror(m) { var z=m(); return "w="+z+"+(c?256:0);c=w&1;w>>=1;"+m+"=w;z=(w==0);s=(w>127);"; }
 function rti(m) { throw "Not implemented"; }
-function rts(m) { return "sp=(sp-2)&255;ip=m[sp+256]+m[256+((sp+1)&255)];"; }
+function rts(m) { return "sp=(sp-2)&255;ip=m[sp+256]+(m[256+((sp+1)&255)]<<8);"; }
 function sbc(m) { return "w=a-"+m()+"-(1-c);c=(w>=0);s=((w&0x80)!=0);v=((a&0x80)!=(w&0x80));a=(w&255);z=(a==0);"; }
 function sec(m) { return "c=1;"; }
 function sed(m) { return "d=1;"; }
@@ -128,7 +359,7 @@ function tya(m) { return "a=y;z=(a==0);s=(a>127);"; }
 var jitstoppers = ["jmp", "jsr", "rts", "brk"];
 
 var opcodes =
-/*  0,8       1,9       2,A       3,B       4,C       5,D       6,E       7,F  */
+/*    0,8           1,9           2,A           3,B           4,C           5,D           6,E           7,F  */
 [["brk","imm"],["ora","iix"],["___","___"],["___","___"],["___","___"],["ora","zpg"],["asl","zpg"],["___","___"],  // 00
  ["php","___"],["ora","imm"],["asl","acc"],["___","___"],["___","___"],["ora","abs"],["asl","abs"],["___","___"],  // 08
  ["bpl","rel"],["ora","iiy"],["___","___"],["___","___"],["___","___"],["ora","zpx"],["asl","zpx"],["___","___"],  // 10
@@ -192,14 +423,27 @@ function disassemble(ip)
 function jit()
 {
     var count = 0, code = "(function(){";
-    var ip0 = ip;
+    var ip0 = ip, addr;
     while (count < 100)
     {
         count += 1;
-        var op = opcodes[m[ip++]];
-        code += window[op[0]](window[op[1]]) + "\n";
-        if (jitstoppers.indexOf(op[0]) > -1)
-            break;
+        if (m[ip] == 0x8D && special_write[addr=m[ip+1]+256*m[ip+2]])
+        {
+            code += special_write[addr].name + "(a);\n";
+            ip += 3;
+        }
+        else if (m[ip] == 0xAD && special_read[addr=m[ip+1]+256*m[ip+2]])
+        {
+            code += "a="+special_read[addr].name+"();z=(a==0);s=(a>127);\n";
+            ip += 3;
+        }
+        else
+        {
+            var op = opcodes[m[ip++]];
+            code += window[op[0]](window[op[1]]) + "\n";
+            if (jitstoppers.indexOf(op[0]) > -1)
+                break;
+        }
         if (count == 100)
             code += "ip=" + ip + ";";
     }
@@ -208,19 +452,13 @@ function jit()
     return eval(code);
 }
 
-function step()
-{
-    var f = jitcode[ip];
-    if (!f) f = jitcode[ip] = jit();
-    f();
-}
-
 function assemble(s)
 {
     var labels = {};
     var fixups = [];
     var mm, opcode, mr, addr;
     s = s.split("\n");
+    ip = 0x200;
     for (var i=0; i<s.length; i++)
     {
         var L = s[i];
@@ -228,7 +466,7 @@ function assemble(s)
             L = L.substr(0, L.indexOf(";"));
         if (/^ *$/.exec(L))
             continue;
-        if ((mm = /^([a-zA-Z][a-zA-Z0-9]*): *$/.exec(L)))
+        if ((mm = /^([a-zA-Z][a-zA-Z0-9_]*): *$/.exec(L)))
         {
             if (labels[mm[1]]) throw "Duplicated label '" + mm[1] + "'";
             labels[mm[1]] = "$" + hex(4, ip);
@@ -236,6 +474,11 @@ function assemble(s)
         else if ((mm = /^ +\.org +\$([0-9A-Fa-f]{4}) *$/.exec(L)))
         {
             ip = parseHex(mm[1]);
+        }
+        else if ((mm = /^([a-zA-Z][a-zA-Z_0-9]+) *= * (\$[0-9A-Fa-f]+) *$/.exec(L)))
+        {
+            if (labels[mm[1]]) throw "Duplicated label '" + mm[1] + "'";
+            labels[mm[1]] = mm[2];
         }
         else
         {
@@ -351,6 +594,14 @@ function assemble(s)
             }
         }
     }
+    if (labels["start"])
+    {
+        ip = parseHex(labels["start"].substr(1));
+    }
+    else
+    {
+        throw "Missing 'start' label";
+    }
     for (var i=0; i<fixups.length; i++)
     {
         var fu = fixups[i];
@@ -371,28 +622,37 @@ function assemble(s)
     }
 }
 
-assemble("    .org $0600\n" +
-         "    ldx #$00\n" +
-         "loop:\n" +
-         "    txa\n" +
-         "    sta $0200,x\n"+
-         "    sta $0300,x\n"+
-         "    sta $0400,x\n"+
-         "    sta $0500,x\n"+
-         "    inx\n"+
-         "    bne loop\n"+
-         "    rts\n"+
-         "    jmp after\n"+
-         "    jsr loop\n"+
-         "    beq after\n"+
-         "    nop\n"+
-         "after:\n"+
-         "    lda ($FE),y\n"+
-         "    brk #$00\n");
+function run()
+{
+    if (ip == 0)
+    {
+        alert("Program execution completed");
+    }
+    else
+    {
+        var start = (new Date).getTime();
+        var now;
+        while (ip != 0 && (now = (new Date).getTime()) < start + 50)
+            for (var k=0; ip && k<100; k++)
+                (jitcode[ip]||(jitcode[ip]=jit()))();
+        ctx.putImageData(data, 0, 0);
+        setTimeout(run, 0);
+    }
+}
 
-ip = 0x600;
-while (true)
-    step();
+function doit()
+{
+    try
+    {
+        assemble(document.getElementById("source").value);
+    }
+    catch(err)
+    {
+        alert(err);
+        return;
+    }
+    setTimeout(run, 0);
+}
 
     </script>
   </body>
