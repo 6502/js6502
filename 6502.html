@@ -46,6 +46,12 @@ set_row     = $FF02 ; W: pixel row
 set_col     = $FF03 ; W: pixel col
 write_pixel = $FF04 ; W++: writes a pixel
 
+random      = $FF80 ; R: a random byte
+clock0      = $FF81 ; R: updates clock and returns low byte
+clock1      = $FF82 ; R: returns second byte of clock
+clock2      = $FF83 ; R: returns third byte of clock
+clock3      = $FF84 ; R: returns fourth byte of clock
+
 ;
 ; Execution begins at "start" and stops when
 ; program counter becomes $0000
@@ -86,32 +92,6 @@ fbxloop:
     bne fillbox
     rts
 
-;; Clears a box to background (color=x+y)
-clearbox:
-    lda y0
-    sta set_row
-    lda x0
-    sta set_col
-    lda x1
-    sec
-    sbc x0
-    tax
-    lda x0
-    clc
-    adc y0
-    tay
-cbxloop:
-    tya
-    sta write_pixel
-    iny
-    dex
-    bne cbxloop
-    inc y0
-    lda y0
-    cmp y1
-    bne clearbox
-    rts
-
 ;; Sets square coordinates
 set_square:
     lda sqx
@@ -128,14 +108,17 @@ set_square:
 
 ;; Main program
 start:
-    ; clear screen 
+    ; clear screen to random
     lda #$00
-    sta x0
-    sta y0
-    lda #$FF
-    sta x1
-    sta y1
-    jsr clearbox
+    tax
+    tay
+cloop:
+    lda random
+    sta write_pixel
+    dex
+    bne cloop
+    dey
+    bne cloop
 
     ; Set a green-red bouncing palette
     lda #$00
@@ -259,13 +242,28 @@ function write_pixel(x)
     ctx.putImageData(data, 0, 0);
 })();
 
+// Random numbers and time tracking
+
+var ctime = 0;
+
+function random() { return (Math.random() * 256) & 255; }
+function clock0() { ctime = (new Date).getTime(); return ctime&255; }
+function clock1() { return (ctime >> 8) & 255; }
+function clock2() { return (ctime >> 16) & 255; }
+function clock3() { return (ctime >> 24) & 255; }
+
 // Note: special read/write only works for LDA/STA absolute
 var special_write = { 0xFF00: set_palette,
                       0xFF01: write_color,
                       0xFF02: set_row,
                       0xFF03: set_col,
                       0xFF04: write_pixel };
-var special_read = { };
+
+var special_read = { 0xFF80: random,
+                     0xFF81: clock0,
+                     0xFF82: clock1,
+                     0xFF83: clock2,
+                     0xFF84: clock3 };
 
 // Utility ////////////////////////////////////////////////////////////
 
