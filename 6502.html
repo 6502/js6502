@@ -443,7 +443,7 @@ function fsz()  { return fz()+fs(); }
 function fszm()
 {
     // Special case; if current delayed S/Z flags are
-    // from memory then we must evalate them before any
+    // from memory then we must evaluate them before any
     // memory write. If they're from registers then
     // we can instead just keep delaying...
     return ((set_z.indexOf("m")!=-1 ? fz() : "") +
