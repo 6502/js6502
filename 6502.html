@@ -426,6 +426,9 @@ function parseBin(x)
 
 var m = new Uint8Array(65536);
 var jitcode = [];
+var jitmap = [];
+var alive = true;
+var current_f = null;
 var a=0, x=0, y=0, c=0, z=0, w=0, s=0, d=0, v=0, ip=0, sp=0;
 
 // Lazy Z/S evaluation; set_[sz] contains the code to set the flag
@@ -533,9 +536,9 @@ function sbc(m) { ssz("w"); return "w=a-"+m+"-(1-c);c=(w>=0);v=((a&0x80)!=(w&0x8
 function sec(m) { return "c=1;"; }
 function sed(m) { throw "Not implemented"; }
 function sei(m) { throw "Not implemented"; }
-function sta(m) { return fszm()+m+"=a;"; }
-function stx(m) { return fszm()+m+"=x;"; }
-function sty(m) { return fszm()+m+"=y;"; }
+function sta(m) { return "maykill("+m.substr(2,m.length-3)+");"+fszm()+m+"=a;if(!alive){ip="+ip+";return;}"; }
+function stx(m) { return "maykill("+m.substr(2,m.length-3)+");"+fszm()+m+"=x;if(!alive){ip="+ip+";return;}"; }
+function sty(m) { return "maykill("+m.susbtr(2,m.length-3)+");"+fszm()+m+"=y;if(!alive){ip="+ip+";return;}"; }
 function tax(m) { ssz("a"); return "x=a;"; }
 function tay(m) { ssz("a"); return "y=a;"; }
 function tsx(m) { ssz("x"); return "x=sp;"; }
@@ -607,6 +610,23 @@ function disassemble(ip)
     }
 }
 
+function maykill(m)
+{
+    var aL = jitmap[m];
+    while (aL && aL.length)
+    {
+        var f = aL.pop();
+        if (f === current_f) alive = false;
+        for (var i=f.ip0; i<f.ip; i++)
+        {
+            var L = jitmap[i];
+            var j = L.indexOf(f, L);
+            L.splice(j, 1);
+        }
+        jitcode[f.ip0] = undefined;
+    }
+}
+
 function jit()
 {
     var count = 0, code = "(function(){";
@@ -636,8 +656,20 @@ function jit()
             code += "ip=" + ip + ";";
     }
     code += fsz()+"})";
+    var f = eval(code);
+
+    for (var i=ip0; i<ip; i++)
+    {
+        var L = jitmap[i] = (jitmap[i] || []);
+        L.push(f);
+    }
+    f.ip0 = ip0;
+    f.ip = ip;
+    f.alive = true;
+
     ip = ip0;
-    return eval(code);
+
+    return f;
 }
 
 function assemble(s)
@@ -840,8 +872,13 @@ function run()
         var start = (new Date).getTime();
         var now;
         while (ip != 0 && (now = (new Date).getTime()) < start + 50)
+        {
             for (var k=0; ip && k<100; k++)
-                (jitcode[ip]||(jitcode[ip]=jit()))();
+            {
+                alive = true;
+                (current_f=(jitcode[ip]||(jitcode[ip]=jit())))();
+            }
+        }
         ctx.putImageData(data, 0, 0);
         setTimeout(run, 0);
     }
