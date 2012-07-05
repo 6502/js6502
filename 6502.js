@@ -1,4 +1,3 @@
-
 /****************************************************************************
 ******************************************************************************
 **                                                                          **
@@ -272,7 +271,8 @@ function jit()
 {
     var count = 0, code = "(function(){";
     var ip0 = ip, addr;
-    while (count < 100)
+    var NN = 100;
+    while (count < NN)
     {
         count += 1;
         if (m[ip] == 0x8D && special_write[addr=m[ip+1]+256*m[ip+2]])
@@ -293,7 +293,7 @@ function jit()
             if (jitstoppers.indexOf(op[0]) > -1)
                 break;
         }
-        if (count == 100)
+        if (count == NN)
             code += "ip=" + ip + ";";
     }
     code += fsz()+"})";
