@@ -25,16 +25,20 @@ start:
     ; "Regular" non-self-modifying code
     ;
     ldx #$00
-    ldy #$00
+    ldy #$10
     lda #$00
+    sta set_row
+    sta set_col
 loop1:
-    stx write_pixel
-    inx
+    sta write_pixel
+    clc
+    adc #$01
     bne loop1
-    iny
+    dex
     bne loop1
     clc
     adc #$01
+    dey
     bne loop1
     jmp $0300
 
@@ -43,7 +47,7 @@ loop1:
     ; Self-modifying code
     ;
     ldx #$00
-    ldy #$00
+    ldy #$10
 loop2:
     lda #$00 ; <----- $00 will be incremented!
     sta write_pixel
@@ -51,6 +55,7 @@ loop2:
     bne loop2
     dex
     bne loop2
+    inc $0305
     dey
     bne loop2
     jmp $0000

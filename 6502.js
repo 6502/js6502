@@ -149,11 +149,11 @@ function clv(m) { return "v=0;"; }
 function cmp(m) { ssz("w"); return "c=(a>="+m+");w=(a-"+m+")&255;"; }
 function cpx(m) { ssz("w"); return "c=(x>="+m+");w=(x-"+m+")&255;"; }
 function cpy(m) { ssz("w"); return "c=(y>="+m+");w=(y-"+m+")&255;"; }
-function dec(m) { ssz(m); return m+"=("+m+"-1)&255;"; }
+function dec(m) { ssz(m); return "maykill("+m.substr(2,m.length-3)+");"+m+"=("+m+"-1)&255;if(!alive){ip="+ip+";return;}"; }
 function dex(m) { ssz("x"); return "x=(x-1)&255;"; }
 function dey(m) { ssz("y"); return "y=(y-1)&255;"; }
 function eor(m) { ssz("a"); return "a^="+m+";"; }
-function inc(m) { ssz(m); return m+"=("+m+"+1)&255;"; }
+function inc(m) { ssz(m); return "maykill("+m.substr(2,m.length-3)+");"+m+"=("+m+"+1)&255;if(!alive){ip="+ip+";return;}"; }
 function inx(m) { ssz("x"); return "x=(x+1)&255;"; }
 function iny(m) { ssz("y"); return "y=(y+1)&255;"; }
 function jmp(m) { return fsz()+"ip="+m+"; return;"; }
@@ -271,7 +271,7 @@ function jit()
 {
     var count = 0, code = "(function(){";
     var ip0 = ip, addr;
-    var NN = 100;
+    var NN = 2;
     while (count < NN)
     {
         count += 1;
