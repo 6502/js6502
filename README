@@ -31,7 +31,4 @@ Not an interpreter, but a JIT compiler to Javascript.
 
 Includes a 6502 disassembler and a small assembler.
 
-Work in progress... currently doesn't support code patching
-(i.e. writing in the middle of a memory area that contains
-code that was or is being executed... I'm still thinking how
-to get that running reasonably fast).
+Now with support of self-modifying code.
