@@ -31,4 +31,6 @@ Not an interpreter, but a JIT compiler to Javascript.
 
 Includes a 6502 disassembler and a small assembler.
 
-Now with support of self-modifying code.
+Now with partial support of self-modifying code. Memory can be modified
+in MANY ways (including PHA or JSR) and code can be anywhere. Now it works
+only if the memory change is done using STA, STX, STY, INC or DEC.
