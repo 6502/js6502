@@ -157,7 +157,7 @@ function inc(m) { ssz(m); return "maykill("+m.substr(2,m.length-3)+");"+m+"=("+m
 function inx(m) { ssz("x"); return "x=(x+1)&255;"; }
 function iny(m) { ssz("y"); return "y=(y+1)&255;"; }
 function jmp(m) { return fsz()+"ip="+m+"; return;"; }
-function jsr(m) { return fsz()+"m[256+sp]="+(ip&255)+";m[256+((sp+1)&255)]="+(ip>>8)+";sp=(sp+2)&255;ip="+m+";return;"; }
+function jsr(m) { return fsz()+"m[256+sp]="+((ip-1)&255)+";m[256+((sp+1)&255)]="+((ip-1)>>8)+";sp=(sp+2)&255;ip="+m+";return;"; }
 function lda(m) { ssz("a"); return "a="+m+";"; }
 function ldx(m) { ssz("x"); return "x="+m+";"; }
 function ldy(m) { ssz("y"); return "y="+m+";"; }
@@ -171,7 +171,7 @@ function plp(m) { throw "Not implemented"; }
 function rol(m) { ssz(m); return "w="+m+";"+m+"=((w<<1)+c)&255;c=(w>127);"; }
 function ror(m) { ssz(m); return "w="+m+";"+m+"=((w>>1)+(c<<7));c=(w&1);"; }
 function rti(m) { throw "Not implemented"; }
-function rts(m) { return fsz()+"sp=(sp-2)&255;ip=m[sp+256]+(m[256+((sp+1)&255)]<<8);"; }
+function rts(m) { return fsz()+"sp=(sp-2)&255;ip=(m[sp+256]+(m[256+((sp+1)&255)]<<8)+1)&65535;"; }
 function sbc(m) { ssz("w"); return "w=a-"+m+"-(1-c);c=(w>=0);v=((a&0x80)!=(w&0x80));a=(w&255);"; }
 function sec(m) { return "c=1;"; }
 function sed(m) { throw "Not implemented"; }
