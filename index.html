@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen" />
+    <link rel="stylesheet" type="text/css" href="stylesheets/pygment_trac.css" media="screen" />
+    <link rel="stylesheet" type="text/css" href="stylesheets/print.css" media="print" />
+
+    <title>Js6502 by 6502</title>
+  </head>
+
+  <body>
+
+    <header>
+      <div class="container">
+        <h1>Js6502</h1>
+        <h2>Javascript 6502 emulator</h2>
+
+        <section id="downloads">
+          <a href="https://github.com/6502/js6502/zipball/master" class="btn">Download as .zip</a>
+          <a href="https://github.com/6502/js6502/tarball/master" class="btn">Download as .tar.gz</a>
+          <a href="https://github.com/6502/js6502" class="btn btn-github"><span class="icon"></span>View on GitHub</a>
+        </section>
+      </div>
+    </header>
+
+    <div class="container">
+      <section id="main_content">
+        <p>6502 Javascript emulator.</p>
+
+<p>Not an interpreter, but a JIT compiler to Javascript (that in
+turn gets JIT compiled to native code in many browsers)</p>
+
+<p>Includes a 6502 disassembler and a small assembler.</p>
+
+<p>Now with partial support of self-modifying code.</p>
+
+<p>Memory can be modified in MANY ways (including PHA or JSR) and code
+can be anywhere (including in the stack!). Current implementation
+works only if the memory change is done using STA, STX, STY, INC or
+DEC.</p>
+
+<p>Another shortcut is that "special locations" used for I/O do work
+only if accessed using STA abs / LDA abs instructions (normally on
+hardware implementations any read/write triggers the special behavior).</p>
+      </section>
+    </div>
+
+    
+  </body>
+</html>
