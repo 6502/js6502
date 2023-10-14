@@ -185,7 +185,7 @@ function tsx(m) { ssz("x"); return "x=sp;"; }
 function txa(m) { ssz("a"); return "a=x;"; }
 function txs(m) { return "sp=x;"; }
 function tya(m) { ssz("a"); return "a=y;"; }
-function dbg(m) { return "console.log({a,x,y,addr:m[0x12]+256*m[0x13], m:m[y+m[0x12]+256*m[0x13]]});"; }
+function dbg(m) { return "console.log({a,x,y});"; }
 
 let jitstoppers = ["jmp", "jsr", "rts", "brk"];
 
