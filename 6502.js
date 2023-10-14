@@ -28,17 +28,17 @@
 // Note: special read/write only works for LDA/STA absolute
 
 // key=address, value=function(data){...}
-var special_write = { };
+let special_write = { };
 
 // key=address, value=function(){...}
-var special_read = { };
+let special_read = { };
 
 // Utility ////////////////////////////////////////////////////////////
 
 function hex(n,x)
 {
-    var r = "";
-    for (var i=0; i<n; i++)
+    let r = "";
+    for (let i=0; i<n; i++)
     {
         r = "0123456789ABCDEF"[x & 15] + r;
         x >>= 4;
@@ -48,39 +48,39 @@ function hex(n,x)
 
 function parseHex(x)
 {
-    var r = 0;
-    for (var i=0; i<x.length; i++)
+    let r = 0;
+    for (let i=0; i<x.length; i++)
         r = (r << 4) + "0123456789ABCDEF".indexOf(x[i].toUpperCase());
     return r;
 }
 
 function parseBin(x)
 {
-    var r = 0;
-    for (var i=0; i<x.length; i++)
+    let r = 0;
+    for (let i=0; i<x.length; i++)
         r = (r << 1) + (x[i]=="1");
     return r;
 }
 
 // Virtual CPU ////////////////////////////////////////////////////////
 
-var m = new Uint8Array(65536);
-var jitcode = [];
-var jitmap = [];
-var alive = true;
-var current_f = null;
-var a=0, x=0, y=0, c=0, z=0, w=0, s=0, d=0, v=0, ip=0, sp=0;
+let m = new Uint8Array(65536);
+let jitcode = [];
+let jitmap = [];
+let alive = true;
+let current_f = null;
+let a=0, x=0, y=0, c=0, z=0, w=0, s=0, d=0, v=0, ip=0, sp=0;
 
 // Lazy Z/S evaluation; set_[sz] contains the code to set the flag
 // s[sz](x) sets this code, f[sz]() returns the code and clears it.
-var set_z = "";
-var set_s = "";
+let set_z = "";
+let set_s = "";
 
 function sz(x)  { set_z = "z=!(" + x + ");"; }
 function ss(x)  { set_s = "s=((" + x + ")>127);"; }
 function ssz(x) { sz(x); ss(x); }
-function fz()   { var oz=set_z; set_z=""; return oz; }
-function fs()   { var os=set_s; set_s=""; return os; }
+function fz()   { let oz=set_z; set_z=""; return oz; }
+function fs()   { let os=set_s; set_s=""; return os; }
 function fsz()  { return fz()+fs(); }
 
 function fszm()
@@ -102,11 +102,11 @@ function zpy() { return "m[(y+"+m[ip++]+")&255]"; }
 function abs() { ip+=2; return "m["+(m[ip-2]+(m[ip-1]<<8))+"]"; }
 function abx() { ip+=2; return "m[(x+"+(m[ip-2]+(m[ip-1]<<8))+")&65535]"; }
 function aby() { ip+=2; return "m[(y+"+(m[ip-2]+(m[ip-1]<<8))+")&65535]"; }
-function iix() { var z=m[ip++]; return "m[m[("+z+"+x)&255]+(m[("+(z+1)+"+x)&255]<<16)]"; }
-function iiy() { var z=m[ip++]; return "m[(m["+z+"]+(m["+((z+1)&255)+"]<<16)+y)&65535]"; }
-function rel() { var delta=m[ip++]; if(delta>=128)delta-=256; return ""+((ip+delta)&65535); }
+function iix() { let z=m[ip++]; return "m[m[("+z+"+x)&255]+(m[("+(z+1)+"+x)&255]<<8)]"; }
+function iiy() { let z=m[ip++]; return "m[(m["+z+"]+(m["+((z+1)&255)+"]<<8)+y)&65535]"; }
+function rel() { let delta=m[ip++]; if(delta>=128)delta-=256; return ""+((ip+delta)&65535); }
 function adr() { ip+=2; return ""+(m[ip-2]+(m[ip-1]<<8)); }
-function ind() { var z=m[ip]+m[ip+1]*256; ip+=2; return "m["+z+"]+(m["+((z+1)&65535)+"]<<8)"; }
+function ind() { let z=m[ip]+m[ip+1]*256; ip+=2; return "m["+z+"]+(m["+((z+1)&65535)+"]<<8)"; }
 function acc() { return "a"; }
 
 // Disassembling addressing modes
@@ -120,7 +120,7 @@ function s_abx(ip)  { return [2, "$" + hex(4,m[ip]+m[(ip+1)&65535]*256) + ",x"];
 function s_aby(ip)  { return [2, "$" + hex(4,m[ip]+m[(ip+1)&65535]*256) + ",y"]; }
 function s_iix(ip)  { return [1, "($" + hex(2,m[ip]) + ",x)"]; }
 function s_iiy(ip)  { return [1, "($" + hex(2,m[ip]) + "),y"]; }
-function s_rel(ip)  { var delta = m[ip]; if (delta>=128) delta-=256; return [1, "$" + hex(4,ip+1+delta)]; }
+function s_rel(ip)  { let delta = m[ip]; if (delta>=128) delta-=256; return [1, "$" + hex(4,ip+1+delta)]; }
 function s_adr(ip)  { return [2, "$" + hex(4,m[ip]+m[ip+1]*256)]; }
 function s_ind(ip)  { return [2, "($" + hex(4,m[ip]+m[ip+1]*256) + ")"]; }
 function s_acc(ip)  { return [0, "a"]; }
@@ -185,10 +185,11 @@ function tsx(m) { ssz("x"); return "x=sp;"; }
 function txa(m) { ssz("a"); return "a=x;"; }
 function txs(m) { return "sp=x;"; }
 function tya(m) { ssz("a"); return "a=y;"; }
+function dbg(m) { return "console.log({a,x,y,addr:m[0x12]+256*m[0x13], m:m[y+m[0x12]+256*m[0x13]]});"; }
 
-var jitstoppers = ["jmp", "jsr", "rts", "brk"];
+let jitstoppers = ["jmp", "jsr", "rts", "brk"];
 
-var opcodes =
+let opcodes =
 /*    0,8           1,9           2,A           3,B           4,C           5,D           6,E           7,F  */
 [["brk","imm"],["ora","iix"],["___","___"],["___","___"],["___","___"],["ora","zpg"],["asl","zpg"],["___","___"],  // 00
  ["php","___"],["ora","imm"],["asl","acc"],["___","___"],["___","___"],["ora","abs"],["asl","abs"],["___","___"],  // 08
@@ -221,17 +222,17 @@ var opcodes =
  ["cpx","imm"],["sbc","iix"],["___","___"],["___","___"],["cpx","zpg"],["sbc","zpg"],["inc","zpg"],["___","___"],  // E0
  ["inx","___"],["sbc","imm"],["nop","___"],["___","___"],["cpx","abs"],["sbc","abs"],["inc","abs"],["___","___"],  // E8
  ["beq","rel"],["sbc","iiy"],["___","___"],["___","___"],["___","___"],["sbc","zpx"],["inc","zpx"],["___","___"],  // F0
- ["sed","___"],["sbc","aby"],["___","___"],["___","___"],["___","___"],["sbc","abx"],["inc","abx"],["___","___"]]; // F8
+ ["sed","___"],["sbc","aby"],["___","___"],["___","___"],["___","___"],["sbc","abx"],["inc","abx"],["dbg","___"]]; // F8
 
-var revopcodes = {};
+let revopcodes = {};
 (function() {
-    for (var i=0; i<256; i++)
+    for (let i=0; i<256; i++)
         revopcodes[opcodes[i][0]+"/"+opcodes[i][1]] = i;
 })();
 
 function disassemble(ip)
 {
-    var op = opcodes[m[ip]];
+    let op = opcodes[m[ip]];
     if (op[0] == "___")
     {
         return [0, hex(4, ip) + ": " + hex(2, m[ip]) + "       ???"];
@@ -242,7 +243,7 @@ function disassemble(ip)
     }
     else
     {
-        var ds = window["s_" + op[1]]((ip+1)&65535);
+        let ds = window["s_" + op[1]]((ip+1)&65535);
         return [ds[0], (hex(4, ip) + ": " + hex(2, m[ip]) + " " +
                         (ds[0] > 0 ? hex(2, m[(ip+1)&65535]) : "  ") + " " +
                         (ds[0] > 1 ? hex(2, m[(ip+2)&65535]) : "  ") + " " +
@@ -252,15 +253,15 @@ function disassemble(ip)
 
 function maykill(m)
 {
-    var aL = jitmap[m];
+    let aL = jitmap[m];
     while (aL && aL.length)
     {
-        var f = aL.pop();
+        let f = aL.pop();
         if (f === current_f) alive = false;
-        for (var i=f.ip0; i<f.ip; i++)
+        for (let i=f.ip0; i<f.ip; i++)
         {
-            var L = jitmap[i];
-            var j = L.indexOf(f, L);
+            let L = jitmap[i];
+            let j = L.indexOf(f, L);
             L.splice(j, 1);
         }
         jitcode[f.ip0] = undefined;
@@ -269,9 +270,9 @@ function maykill(m)
 
 function jit()
 {
-    var count = 0, code = "(function(){";
-    var ip0 = ip, addr;
-    var NN = 2;
+    let count = 0, code = "(function(){";
+    let ip0 = ip, addr;
+    let NN = 2;
     while (count < NN)
     {
         count += 1;
@@ -288,7 +289,7 @@ function jit()
         }
         else
         {
-            var op = opcodes[m[ip++]];
+            let op = opcodes[m[ip++]];
             code += window[op[0]](window[op[1]]()) + "\n";
             if (jitstoppers.indexOf(op[0]) > -1)
                 break;
@@ -297,11 +298,11 @@ function jit()
             code += "ip=" + ip + ";";
     }
     code += fsz()+"})";
-    var f = eval(code);
+    let f = eval(code);
 
-    for (var i=ip0; i<ip; i++)
+    for (let i=ip0; i<ip; i++)
     {
-        var L = jitmap[i] = (jitmap[i] || []);
+        let L = jitmap[i] = (jitmap[i] || []);
         L.push(f);
     }
     f.ip0 = ip0;
@@ -315,14 +316,13 @@ function jit()
 
 function assemble(s)
 {
-    var labels = {};
-    var fixups = [];
-    var mm, opcode, mr, addr;
+    let labels = {};
+    let fixups = [];
+    let mm, opcode, mr, addr;
     s = s.split("\n");
     ip = 0x200;
-    for (var i=0; i<s.length; i++)
-    {
-        var L = s[i];
+    for (let i=0; i<s.length; i++) {
+        let L = s[i];
         if (L.indexOf(";") != -1)
             L = L.substr(0, L.indexOf(";"));
         if (/^ *$/.exec(L))
@@ -338,10 +338,10 @@ function assemble(s)
         }
         else if ((mm = /^ +\.db +((\$[0-9A-Fa-f]{2}|[0-9]+|%[01]{8})( *, *(\$[0-9A-Fa-f]{2}|[0-9]+|%[01]{8}))*) *$/.exec(L)))
         {
-            var bytes = mm[1].split(",");
-            for (var j=0; j<bytes.length; j++)
+            let bytes = mm[1].split(",");
+            for (let j=0; j<bytes.length; j++)
             {
-                var bb = bytes[j];
+                let bb = bytes[j];
                 if ((mm = /\$([0-9A-Fa-f]{2})/.exec(bb)))
                     m[ip++] = parseHex(mm[1]);
                 else if ((mm = /%([01]{8})/.exec(bb)))
@@ -361,17 +361,17 @@ function assemble(s)
             {
                 if (labels[x])
                     x = labels[x];
-                var mm;
+                let mm;
                 if ((mm = /^\$([0-9a-fA-F]{2})$/.exec(x)))
                     return [parseHex(mm[1])];
                 if ((mm = /^\$([0-9a-fA-F]{4})$/.exec(x)))
                 {
-                    var x16 = parseHex(mm[1]);
+                    let x16 = parseHex(mm[1]);
                     return [x16&255, x16>>8];
                 }
                 if ((mm = /^([0-9]+)$/.exec(x)))
                 {
-                    var x16 = parseInt(x);
+                    let x16 = parseInt(x);
                     return [x16&255, x16>>8];
                 }
                 if ((mm = /^([a-zA-Z][a-zA-Z0-9_]*)$/.exec(x)))
@@ -437,7 +437,7 @@ function assemble(s)
             else if ((mm = /^ +([a-z]{3}) +\((\$[0-9A-Fa-f]+|[0-9]+|[a-zA-Z][a-zA-Z0-9_]*)\) *$/.exec(L)))
             {
                 opcode = mm[1];
-                var addr = value(mm[2]);
+                let addr = value(mm[2]);
                 mr = ["ind", addr[0], addr[1]];
             }
             else
@@ -454,7 +454,7 @@ function assemble(s)
                 }
                 else
                 {
-                    var delta = mr[1] + mr[2]*256 - (ip + 2);
+                    let delta = mr[1] + mr[2]*256 - (ip + 2);
                     if (delta < -128 || delta > 127)
                         throw "Relative jump out of range";
                     mr = ["rel", delta & 255];
@@ -464,10 +464,10 @@ function assemble(s)
             if (opcode[0] == "j" && mr[0] == "abs")
                 mr[0] = "adr";
 
-            var rop = revopcodes[opcode + "/" + mr[0]];
-            if (rop == undefined) throw "Invalid operation/addressing mode";
+            let rop = revopcodes[opcode + "/" + mr[0]];
+            if (rop == undefined) throw '"' + L + "\": Invalid operation/addressing mode";
             m[ip] = rop; ip = (ip + 1)&65535;
-            for (var j=1; j<mr.length; j++)
+            for (let j=1; j<mr.length; j++)
             {
                 m[ip] = mr[j];
                 ip = (ip + 1) & 65535;
@@ -482,20 +482,20 @@ function assemble(s)
     {
         throw "Missing 'start' label";
     }
-    for (var i=0; i<fixups.length; i++)
+    for (let i=0; i<fixups.length; i++)
     {
-        var fu = fixups[i];
-        var addr = labels[fu[1]];
+        let fu = fixups[i];
+        let addr = labels[fu[1]];
         if (addr == undefined) throw "Undefined label '" + fu[1] + "'";
         if (fu[2] == "rel")
         {
-            var delta = parseHex(addr.substr(1)) - (fu[0] + 1);
+            let delta = parseHex(addr.substr(1)) - (fu[0] + 1);
             if (delta < -128 || delta > 127) throw "Relative jump to '" + fu[1] + "' out of range";
             m[fu[0]] = delta & 255;
         }
         else
         {
-            var target = parseHex(addr.substr(1));
+            let target = parseHex(addr.substr(1));
             m[fu[0]] = target & 255;
             m[fu[0]+1] = target >> 8;
         }
@@ -510,11 +510,11 @@ function run()
     }
     else
     {
-        var start = (new Date).getTime();
-        var now;
+        let start = (new Date).getTime();
+        let now;
         while (ip != 0 && (now = (new Date).getTime()) < start + 50)
         {
-            for (var k=0; ip && k<100; k++)
+            for (let k=0; ip && k<100; k++)
             {
                 alive = true;
                 (current_f=(jitcode[ip]||(jitcode[ip]=jit())))();
