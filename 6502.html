@@ -3,7 +3,7 @@
  ****************************************************************************
 ******************************************************************************
 **                                                                          **
-**  Copyright (c) 2012 by Andrea Griffini                                   **
+**  Copyright (c) 2023 by Andrea Griffini                                   **
 **                                                                          **
 **  Permission is hereby granted, free of charge, to any person obtaining   **
 **  a copy of this software and associated documentation files (the         **
@@ -30,21 +30,33 @@
 <html>
   <head>
     <title>6502 emulator</title>
+    <style>
+      #canvas {
+          image-rendering: pixelated;
+          background: #000;
+      }
+      #source {
+          overflow: auto;
+          white-space: pre;
+          font-family: monospace;
+          height: 500px;
+          width: 500px;
+      }
+    </style>
   </head>
   <body>
     <table border=0>
-    <tr><td>
+    <tr><td valign="top">
     Virtual graphic screen<br/>
-    <canvas id="canvas" style="width:512px; height:512px; border:solid 1px #000">
-    </canvas>
-    </td><td>
+    <canvas id="canvas"></canvas>
+    </td><td valign="top">
     <select id="examples" onchange="loadexample()">
       <option value="">Select a demo program</option>
       <option value="demo1.asm">Graphic demo</option>
       <option value="demo2.asm">Self-modifying code</option>
       <option value="demo0.asm">Special locations only</option>
-    </select>
-    <textarea id="source" style="height:508px; width:512px;">...put your code...</textarea>
+    </select><br/>
+    <textarea id="source">...put your code...</textarea><br/>
     <input type=button value="Run" onclick="doit()">
     </td></tr></table>
     <script src="6502.js"></script>
@@ -52,7 +64,7 @@
 
 function http(verb, url, data, onSuccess, onFail)
 {
-    var req = new XMLHttpRequest();
+    let req = new XMLHttpRequest();
     if (onSuccess) {
         req.onreadystatechange = function() {
             if (req.readyState === 4) {
@@ -77,7 +89,7 @@ function http(verb, url, data, onSuccess, onFail)
 
 function loadexample()
 {
-    var example_name = document.getElementById("examples").value;
+    let example_name = document.getElementById("examples").value;
     http("GET", example_name, "", function(x){
         document.getElementById("source").value = x;
     });
@@ -85,34 +97,37 @@ function loadexample()
 
 // Virtual screen interface /////////////////////////////////////////////////////
 
-var canvas = document.getElementById("canvas");
+let canvas = document.getElementById("canvas");
 canvas.width = canvas.height = 256;
-var ctx = canvas.getContext("2d");
-var data = ctx.getImageData(0, 0, 256, 256);
-var bytes = data.data;
-var current_palette = [];
-var current_palette_index = 0;
-var current_palette_comp = 0;
-var current_address = 0;
+canvas.style.width = (512 / window.devicePixelRatio) + "px";
+canvas.style.height = (512 / window.devicePixelRatio) + "px";
 
-(function(){
-    for (var r=0; r<6; r++)
-        for (var g=0; g<6; g++)
-            for (var b=0; b<6; b++)
-                current_palette.push([r*51, g*51, b*51]);
-    for (var g=0; g<40; g++)
-        current_palette.push([Math.floor(g*255/39+0.5),
-                              Math.floor(g*255/39+0.5),
-                              Math.floor(g*255/39+0.5)]);
-})();
+let ctx = canvas.getContext("2d");
+let data = ctx.getImageData(0, 0, 256, 256);
+let bytes = data.data;
+let current_palette = [];
+let current_palette_index = 0;
+let current_palette_comp = 0;
+let current_address = 0;
+
+for (let i=0; i<6*6*6; i++) {
+    let b = i%6, g = (i/6|0)%6, r = i/36|0;
+    current_palette.push([r*51, g*51, b*51]);
+}
+for (let i=0; i<40; i++) {
+    current_palette.push([Math.floor(i*255/39 + 0.5),
+                          Math.floor(i*255/39 + 0.5),
+                          Math.floor(i*255/39 + 0.5)]);
+}
+for (let i=0; i<256*256; i++) {
+    bytes[i*4+3] = 255;
+}
 
 function set_palette(x) { current_palette_index = x; current_palette_comp = 0; }
 
-function write_color(x)
-{
+function write_color(x) {
     current_palette[current_palette_index][current_palette_comp] = x;
-    if (++current_palette_comp == 3)
-    {
+    if (++current_palette_comp == 3) {
         current_palette_comp = 0;
         current_palette_index = (current_palette_index + 1) & 255;
     }
@@ -120,24 +135,17 @@ function write_color(x)
 
 function set_row(x) { current_address = x*256*4 + (current_address & (255*4)); }
 function set_col(x) { current_address = x*4 + (current_address & (255*256*4)); }
-function write_pixel(x)
-{
-    var c = current_palette[x];
+function write_pixel(x) {
+    let c = current_palette[x];
     bytes[current_address] = c[0];
     bytes[current_address+1] = c[1];
     bytes[current_address+2] = c[2];
     current_address = (current_address + 4) & (256*256*4-1);
 }
 
-(function(){
-    for (var i=0; i<256*256; i++)
-        bytes[i*4+3] = 255;
-    ctx.putImageData(data, 0, 0);
-})();
-
 // Random numbers and time tracking
 
-var ctime = 0;
+let ctime = 0;
 
 function random() { return (Math.random() * 256) & 255; }
 function clock0() { ctime = (new Date).getTime(); return ctime&255; }
@@ -145,7 +153,34 @@ function clock1() { return (ctime >> 8) & 255; }
 function clock2() { return (ctime >> 16) & 255; }
 function clock3() { return (ctime >> 24) & 255; }
 
+// Mouse support
+
+let current_mx=0, current_my=0, current_mb=255, cmx=0, cmy=0;
+
+canvas.onmousemove = (event) => {
+    let r = canvas.getBoundingClientRect();
+    cmx = (event.clientX - r.left) * 256 / r.width | 0;
+    cmy = (event.clientY - r.top) * 256 / r.height | 0;
+    current_mb = event.buttons;
+};
+canvas.onmousein = canvas.onmousemove;
+canvas.onmousedown = canvas.onmousemove;
+canvas.onmouseup = canvas.onmousemove;
+canvas.onmouseout = (event) => {
+    cmx = 0; cmy = 0; current_mb = 255;
+}
+canvas.oncontextmenu = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    return false;
+};
+
+function mouseb() { current_mx = cmx; current_my = cmy; return current_mb; }
+function mousex() { return current_mx; }
+function mousey() { return current_my; }
+
 // Note: special read/write only works for LDA/STA absolute
+
 special_write[0xFF00] = set_palette;
 special_write[0xFF01] = write_color;
 special_write[0xFF02] = set_row;
@@ -157,6 +192,10 @@ special_read[0xFF81] = clock0;
 special_read[0xFF82] = clock1;
 special_read[0xFF83] = clock2;
 special_read[0xFF84] = clock3;
+
+special_read[0xFF85] = mouseb;
+special_read[0xFF86] = mousex;
+special_read[0xFF87] = mousey;
 
 function doit()
 {
@@ -171,6 +210,554 @@ function doit()
     }
     setTimeout(run, 0);
 }
+
+document.getElementById("source").value = `
+;
+; Special locations
+; (they work with LDA/STA abs only!)
+;
+set_palette = $FF00 ; W: sets current index
+write_color = $FF01 ; W++: R, G or B
+set_row     = $FF02 ; W: pixel row
+set_col     = $FF03 ; W: pixel col
+write_pixel = $FF04 ; W++: writes a pixel
+
+random      = $FF80 ; R: a random byte
+clock0      = $FF81 ; R: updates clock and returns low byte
+clock1      = $FF82 ; R: returns second byte of clock
+clock2      = $FF83 ; R: returns third byte of clock
+clock3      = $FF84 ; R: returns fourth byte of clock
+
+mouse_b     = $FF85 ; R: mouse buttons (bits 0/1/2) or 255 if outside
+mouse_x     = $FF86 ; R: mouse x position (0 if outside)
+mouse_y     = $FF87 ; R: mouse y position (0 if outside)
+
+;
+; Execution begins at "start" and stops when
+; program counter becomes $0000
+;
+    .org $0200
+    .db $0c, $02, $35, $02, $6a, $02, $a1, $02, $e0, $02, $5b, $03, $ff, $00, $6f, $05
+    .db $1a, $07, $19, $07, $19, $07, $19, $07, $1a, $05, $1c, $03, $1c, $05, $1a, $07
+    .db $18, $09, $19, $05, $1b, $05, $1a, $07, $19, $07, $18, $09, $17, $09, $17, $09
+    .db $18, $07, $17, $0b, $4a, $ff, $00, $2a, $03, $01, $06, $01, $03, $12, $03, $01
+    .db $06, $01, $03, $12, $0e, $12, $0e, $12, $0e, $12, $0e, $12, $0e, $13, $0c, $16
+    .db $08, $18, $08, $17, $0a, $16, $0a, $16, $0a, $16, $0a, $15, $0c, $14, $0c, $14
+    .db $0c, $14, $0c, $13, $0e, $12, $0e, $12, $0e, $49, $b0, $01, $1f, $02, $1e, $03
+    .db $1c, $05, $1a, $07, $18, $09, $16, $0b, $14, $0c, $13, $0d, $12, $0e, $11, $0f
+    .db $12, $06, $01, $07, $13, $01, $04, $08, $16, $0a, $14, $0c, $13, $0c, $14, $0c
+    .db $13, $0d, $13, $0d, $13, $0d, $14, $0c, $14, $0d, $12, $0e, $11, $10, $10, $10
+    .db $48, $4f, $02, $1e, $02, $1d, $04, $1b, $06, $19, $07, $19, $06, $02, $01, $16
+    .db $06, $02, $02, $16, $05, $02, $03, $16, $0a, $17, $08, $18, $08, $1a, $04, $1b
+    .db $06, $18, $0a, $15, $0c, $17, $06, $19, $08, $18, $08, $18, $08, $17, $0a, $16
+    .db $0a, $16, $0a, $15, $0c, $14, $0c, $14, $0c, $14, $0c, $15, $0a, $13, $10, $48
+    .db $cc, $02, $04, $02, $17, $04, $02, $04, $16, $04, $02, $04, $12, $02, $03, $02
+    .db $04, $02, $03, $02, $0d, $04, $03, $01, $04, $01, $03, $04, $0c, $04, $03, $02
+    .db $02, $02, $03, $04, $0d, $02, $04, $06, $04, $02, $0f, $02, $03, $06, $03, $02
+    .db $10, $04, $01, $06, $01, $04, $0c, $02, $02, $10, $02, $02, $07, $04, $02, $0e
+    .db $02, $04, $06, $04, $02, $0e, $02, $04, $07, $02, $01, $12, $01, $02, $0a, $14
+    .db $0c, $14, $0d, $12, $0e, $12, $0e, $08, $02, $08, $0f, $01, $0e, $01, $10, $06
+    .db $01, $02, $01, $06, $10, $01, $01, $02, $03, $02, $03, $02, $01, $01, $10, $06
+    .db $01, $02, $01, $06, $10, $01, $0e, $01, $10, $10, $48, $8f, $02, $1e, $02, $1c
+    .db $06, $1a, $06, $14, $04, $04, $02, $04, $04, $0c, $09, $01, $02, $01, $09, $09
+    .db $18, $08, $03, $03, $0c, $03, $03, $07, $03, $05, $0a, $05, $03, $06, $03, $06
+    .db $08, $06, $03, $06, $03, $02, $01, $01, $01, $02, $06, $02, $01, $01, $01, $02
+    .db $03, $06, $03, $03, $01, $04, $04, $04, $01, $03, $03, $06, $04, $01, $01, $01
+    .db $01, $03, $04, $03, $01, $01, $01, $01, $04, $07, $04, $03, $0a, $03, $04, $08
+    .db $05, $02, $0a, $02, $05, $08, $06, $01, $0a, $01, $06, $09, $08, $01, $04, $01
+    .db $08, $0b, $08, $04, $08, $0d, $07, $01, $02, $01, $07, $0e, $06, $01, $01, $02
+    .db $01, $01, $06, $0f, $01, $0e, $01, $10, $06, $01, $02, $01, $06, $10, $01, $01
+    .db $02, $03, $02, $03, $02, $01, $01, $10, $06, $01, $02, $01, $06, $10, $01, $0e
+    .db $01, $10, $10, $48
+
+;; Box drawing parameters
+x0    = $00
+y0    = $01
+x1    = $02
+y1    = $03
+color = $04
+
+;; Animated square position and speed
+sqx   = $05
+sqy   = $06
+sqdx  = $07
+sqdy  = $08
+
+;; Line drawing
+dx    = $09
+dy    = $0A
+ix    = $0B
+iy    = $0C
+cx    = $0D
+cy    = $0E
+m     = $0F
+
+;; Counter
+count_l = $10
+count_h = $11
+
+;; Chess piece definition reader
+cpdr_l = $12
+cpdr_h = $13
+
+;; Current and old current square on chessboard
+bcsq = $15
+obcsq = $16
+
+;; Draws a line from x0, y0 to x1, y1
+drawline:
+    ; dx/ix computation
+    ldx #$01
+    lda x1
+    sec
+    sbc x0
+    bcs dlxpos
+    eor #$FF
+    sbc #$FE
+    ldx #$FF
+dlxpos:
+    sta dx
+    stx ix
+
+    ; dy/iy computation
+    ldx #$01
+    lda y1
+    sec
+    sbc y0
+    bcs dlypos
+    eor #$FF
+    sbc #$FE
+    ldx #$FF
+dlypos:
+    sta dy
+    stx iy
+
+    ; m/cx/cy computation
+    lda dx
+    cmp dy
+    bcs dlxm
+    lda dy
+dlxm:
+    sta m
+    tay
+    bne dlsome
+    rts
+dlsome:
+    lsr a
+    sta cx
+    sta cy
+
+    ; main loop
+dlloop:
+    lda x0
+    sta set_col
+    lda y0
+    sta set_row
+    lda color
+    sta write_pixel
+
+    ; x-inc
+    lda cx
+    clc
+    adc dx
+    sta cx
+    bcs dlxi
+    cmp m
+    bcc dlnoxi
+dlxi:
+    lda x0
+    clc
+    adc ix
+    sta x0
+    lda cx
+    sec
+    sbc m
+    sta cx
+dlnoxi:
+
+    ; y-inc
+    lda cy
+    clc
+    adc dy
+    sta cy
+    bcs dlyi
+    cmp m
+    bcc dlnoyi
+dlyi:
+    lda y0
+    clc
+    adc iy
+    sta y0
+    lda cy
+    sec
+    sbc m
+    sta cy
+dlnoyi:
+
+    dey
+    bne dlloop
+    rts
+
+
+;; Fills a box with a solid color
+fillbox:
+    lda y0
+    sta set_row
+    lda x0
+    sta set_col
+    lda x1
+    sec
+    sbc x0
+    tax
+    lda color
+fbxloop:
+    sta write_pixel
+    dex
+    bne fbxloop
+    inc y0
+    lda y0
+    cmp y1
+    bne fillbox
+    rts
+
+;; Sets square coordinates for bouncing animation
+set_square:
+    lda sqx
+    clc
+    adc #$08
+    sta x0
+    clc
+    adc #$10
+    sta x1
+    lda sqy
+    clc
+    adc #$08
+    sta y0
+    clc
+    adc #$10
+    sta y1
+    rts
+
+;; Draw chessboard
+drawboard:
+    lda #$00
+    sta sqy
+    sta sqx
+    sta set_palette
+    sta write_color
+    sta write_color
+    sta write_color
+    lda #$FF
+    sta write_color
+    sta write_color
+    sta write_color
+    lda #$AA
+    sta write_color
+    lda #$BB
+    sta write_color
+    lda #$CC
+    sta write_color
+    lda #$77
+    sta write_color
+    lda #$88
+    sta write_color
+    lda #$99
+    sta write_color
+    lda #$FF
+    sta write_color
+    lda #$00
+    sta write_color
+    sta write_color
+drawboard2:
+    lda sqx
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    sta x0
+    adc #$20
+    sta x1
+    lda sqy
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    sta y0
+    adc #$20
+    sta y1
+    lda sqy
+    asl a
+    asl a
+    asl a
+    adc sqx
+    cmp bcsq
+    bne nocurr
+    lda #$04
+    bne drawsq
+nocurr:
+    lda sqx
+    eor sqy
+    and #$01
+    clc
+    adc #$02
+drawsq:
+    sta color
+    jsr fillbox
+
+    lda sqy
+    asl a
+    asl a
+    asl a
+    adc sqx
+    tax
+    lda chesspos,x
+    bne notempty
+    jmp sqempty
+notempty:
+    tax
+    and #$08
+    lsr a
+    lsr a
+    lsr a
+    eor #$01
+    sta color
+    dex
+    txa
+    and #$07
+    asl a
+    tax
+    lda $0200,x
+    sta cpdr_l
+    lda $0201,x
+    sta cpdr_h
+
+    lda sqx
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    sta x0
+    lda sqy
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    sta y0
+
+    ldy #$FF
+    lda #$01
+    sta count_h
+
+loadrun:
+    lda count_h
+    eor #$01
+    sta count_h
+    iny
+    lda (cpdr_l),y
+    sta count_l
+    beq loadrun
+proc1:
+    lda count_h
+    beq noplot
+    lda y0
+    sta set_row
+    lda x0
+    sta set_col
+    lda color
+    sta write_pixel
+noplot:
+    inc x0
+    lda x0
+    cmp x1
+    bne noy
+    lda sqx
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    sta x0
+    inc y0
+    lda y0
+    cmp y1
+    beq sqempty
+noy:
+    dec count_l
+    bne proc1
+    jmp loadrun
+sqempty:
+    inc sqx
+    lda sqx
+    eor #$08
+    bne jdrawboard2
+    sta sqx
+    inc sqy
+    lda sqy
+    cmp #$08
+    beq doneboard
+jdrawboard2:
+    jmp drawboard2
+doneboard:
+    rts
+
+;; Main program
+start:
+    ; clear screen to random
+    lda #$00
+    tax
+    tay
+cloop:
+    lda random
+    sta write_pixel
+    dex
+    bne cloop
+    dey
+    bne cloop
+
+    ; draw 2048 random lines
+    ldy #$08
+    ldx #$00
+cloop2:
+    txa
+    pha
+    tya
+    pha
+    lda random
+    sta x1
+    lda random
+    sta y1
+    tya
+    sta color
+    jsr drawline
+    pla
+    tay
+    pla
+    tax
+    dex
+    bne cloop2
+    dey
+    bne cloop2
+
+    ; Set a green-red bouncing palette
+    lda #$00
+    sta set_palette
+    ldx #$00
+ploop1:
+    txa
+    sta write_color
+    eor #$FF
+    sta write_color
+    lda #$00
+    sta write_color
+    inx
+    inx
+    bne ploop1
+ploop2:
+    txa
+    eor #$FF
+    sta write_color
+    eor #$FF
+    sta write_color
+    lda #$00
+    sta write_color
+    inx
+    inx
+    bne ploop2
+
+    ; Set starting position and speed
+    lda #$01
+    sta sqx
+    sta sqy
+    sta sqdx
+    sta sqdy
+    lda #$00
+    sta count_l
+    sta count_h
+mainloop:
+    ; Increment square position
+    lda sqx
+    clc
+    adc sqdx
+    cmp #$DF
+    bcc xok
+    lda sqdx
+    eor #$FF
+    sta sqdx
+    inc sqdx
+    lda sqx
+xok:
+    sta sqx
+    lda sqy
+    clc
+    adc sqdy
+    cmp #$DD
+    bcc yok
+    lda sqdy
+    eor #$FF
+    sta sqdy
+    inc sqdy
+    lda sqy
+yok:
+    sta sqy
+
+    ; Draw square
+    jsr set_square
+    inc color
+    jsr fillbox
+
+    inc count_l
+    bne mainloop
+    inc count_h
+    bne mainloop
+
+    ; Chessboard
+    lda #$FF
+    sta bcsq
+    sta obcsq
+    jsr drawboard
+
+mouseloop:
+    lda mouse_b
+    cmp #$FF
+    beq setsq
+    lda mouse_y
+    and #$E0
+    lsr a
+    lsr a
+    sta bcsq
+    lda mouse_x
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    clc
+    adc bcsq
+setsq:
+    sta bcsq
+    lda bcsq
+    cmp obcsq
+    beq mouseloop
+    sta obcsq
+    jsr drawboard
+    jmp mouseloop
+
+    jmp $0000
+
+chesspos:
+    .db $0a, $0b, $0c, $0d, $0e, $0c, $0b, $0a
+    .db $09, $09, $09, $09, $09, $09, $09, $09
+    .db $00, $00, $00, $00, $00, $00, $00, $00
+    .db $00, $00, $00, $00, $00, $00, $00, $00
+    .db $00, $00, $00, $00, $00, $00, $00, $00
+    .db $00, $00, $00, $00, $00, $00, $00, $00
+    .db $01, $01, $01, $01, $01, $01, $01, $01
+    .db $02, $03, $04, $05, $06, $04, $03, $02
+`;
 
     </script>
   </body>
