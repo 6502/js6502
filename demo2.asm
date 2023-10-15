@@ -14,6 +14,10 @@ clock1      = $FF82 ; R: returns second byte of clock
 clock2      = $FF83 ; R: returns third byte of clock
 clock3      = $FF84 ; R: returns fourth byte of clock
 
+mouse_b     = $FF85 ; R: mouse buttons (bits 0/1/2) or 255 if outside
+mouse_x     = $FF86 ; R: mouse x position (0 if outside)
+mouse_y     = $FF87 ; R: mouse y position (0 if outside)
+
 ;
 ; Execution begins at "start" and stops when
 ; program counter becomes $0000

@@ -86,12 +86,13 @@ count_h = $11
 cpdr_l = $12
 cpdr_h = $13
 
-;; Current and old current square on chessboard
+;; Current and old current square on chessboard, secondary square
 bcsq = $15
 obcsq = $16
+bcsq2 = $17
 
 ;; Secondary color (foreground) for piece drawing
-color2 = $17
+color2 = $18
 
 ;; Draws a line from x0, y0 to x1, y1
 drawline:
@@ -255,6 +256,11 @@ drawboardsquare:
     lda #$00
     sta write_color
     sta write_color
+    lda #$C0
+    sta write_color
+    lda #$00
+    sta write_color
+    sta write_color
     lda sqx
     asl a
     asl a
@@ -283,6 +289,11 @@ drawboardsquare:
     lda #$04
     bne drawsq
 nocurr:
+    cmp bcsq2
+    bne nocurr2
+    lda #$05
+    bne drawsq
+nocurr2:
     lda sqx
     eor sqy
     and #$01
@@ -505,12 +516,15 @@ yok:
     lda #$FF
     sta bcsq
     sta obcsq
+    sta bcsq2
     jsr drawboard
 
 mouseloop:
+    ldx #$00
     lda mouse_b
     cmp #$FF
     beq setsq
+    tax
     lda mouse_y
     and #$E0
     lsr a
@@ -526,6 +540,33 @@ mouseloop:
     adc bcsq
 setsq:
     sta bcsq
+    cpx #$01
+    bne noclick
+    tax
+waitup:
+    lda mouse_b
+    cmp #$01
+    beq waitup
+    txa
+    ldy bcsq2
+    cpy #$FF
+    beq nomove
+    cpx bcsq2
+    beq updated
+    lda chesspos,y
+    sta chesspos,x
+    lda #$00
+    sta chesspos,y
+updated:
+    lda #$FF
+    sta bcsq2
+    sta bcsq
+    sta obcsq
+    jsr drawboard
+    jmp mouseloop
+nomove:
+    sta bcsq2
+noclick:
     lda bcsq
     cmp obcsq
     beq mouseloop
