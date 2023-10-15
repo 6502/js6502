@@ -14,6 +14,10 @@ clock1      = $FF82 ; R: returns second byte of clock
 clock2      = $FF83 ; R: returns third byte of clock
 clock3      = $FF84 ; R: returns fourth byte of clock
 
+mouse_b     = $FF85 ; R: mouse buttons (bits 0/1/2) or 255 if outside
+mouse_x     = $FF86 ; R: mouse x position (0 if outside)
+mouse_y     = $FF87 ; R: mouse y position (0 if outside)
+
 ;
 ; Execution begins at "start" and stops when
 ; program counter becomes $0000
@@ -81,6 +85,13 @@ count_h = $11
 ;; Chess piece definition reader
 cpdr_l = $12
 cpdr_h = $13
+
+;; Current and old current square on chessboard
+bcsq = $15
+obcsq = $16
+
+;; Secondary color (foreground) for piece drawing
+color2 = $17
 
 ;; Draws a line from x0, y0 to x1, y1
 drawline:
@@ -217,10 +228,8 @@ set_square:
     rts
 
 ;; Draw chessboard
-drawboard:
+drawboardsquare:
     lda #$00
-    sta sqy
-    sta sqx
     sta set_palette
     sta write_color
     sta write_color
@@ -241,7 +250,11 @@ drawboard:
     sta write_color
     lda #$99
     sta write_color
-drawboard2:
+    lda #$FF
+    sta write_color
+    lda #$00
+    sta write_color
+    sta write_color
     lda sqx
     asl a
     asl a
@@ -260,13 +273,23 @@ drawboard2:
     sta y0
     adc #$20
     sta y1
+    lda sqy
+    asl a
+    asl a
+    asl a
+    adc sqx
+    cmp bcsq
+    bne nocurr
+    lda #$04
+    bne drawsq
+nocurr:
     lda sqx
     eor sqy
     and #$01
     clc
     adc #$02
+drawsq:
     sta color
-    jsr fillbox
 
     lda sqy
     asl a
@@ -276,7 +299,7 @@ drawboard2:
     tax
     lda chesspos,x
     bne notempty
-    jmp sqempty
+    jmp fillbox
 notempty:
     tax
     and #$08
@@ -284,7 +307,7 @@ notempty:
     lsr a
     lsr a
     eor #$01
-    sta color
+    sta color2
     dex
     txa
     and #$07
@@ -311,27 +334,25 @@ notempty:
     sta y0
 
     ldy #$FF
-    lda #$01
+    lda color2
     sta count_h
 
 loadrun:
     lda count_h
-    eor #$01
+    eor color
+    eor color2
     sta count_h
     iny
     lda (cpdr_l),y
     sta count_l
     beq loadrun
 proc1:
-    lda count_h
-    beq noplot
     lda y0
     sta set_row
     lda x0
     sta set_col
-    lda color
+    lda count_h
     sta write_pixel
-noplot:
     inc x0
     lda x0
     cmp x1
@@ -346,24 +367,28 @@ noplot:
     inc y0
     lda y0
     cmp y1
-    beq sqempty
+    bne noy
+    rts
 noy:
     dec count_l
     bne proc1
     jmp loadrun
-sqempty:
+
+drawboard:
+    lda #$00
+    sta sqx
+    sta sqy
+drawboard2:
+    jsr drawboardsquare
     inc sqx
     lda sqx
     eor #$08
-    bne jdrawboard2
+    bne drawboard2
     sta sqx
     inc sqy
     lda sqy
     cmp #$08
-    beq doneboard
-jdrawboard2:
-    jmp drawboard2
-doneboard:
+    bne drawboard2
     rts
 
 ;; Main program
@@ -477,11 +502,60 @@ yok:
     bne mainloop
 
     ; Chessboard
+    lda #$FF
+    sta bcsq
+    sta obcsq
     jsr drawboard
 
-    lda #$01
-    ldx #$02
-    ldy #$03
+mouseloop:
+    lda mouse_b
+    cmp #$FF
+    beq setsq
+    lda mouse_y
+    and #$E0
+    lsr a
+    lsr a
+    sta bcsq
+    lda mouse_x
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    clc
+    adc bcsq
+setsq:
+    sta bcsq
+    lda bcsq
+    cmp obcsq
+    beq mouseloop
+    lda obcsq
+    cmp #$FF
+    beq no_clear_old
+    and #$07
+    sta sqx
+    lda obcsq
+    lsr a
+    lsr a
+    lsr a
+    sta sqy
+    jsr drawboardsquare
+no_clear_old:
+    lda bcsq
+    sta obcsq
+    cmp #$FF
+    beq no_draw_new
+    and #$07
+    sta sqx
+    lda bcsq
+    lsr a
+    lsr a
+    lsr a
+    sta sqy
+    jsr drawboardsquare
+no_draw_new:
+    jmp mouseloop
+
     jmp $0000
 
 chesspos:
